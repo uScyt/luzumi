@@ -25,3 +25,7 @@ base64 = "0.22"
 libc = "0.2"
 zip = "2"
 rusqlite = { version = "0.31", features = ["bundled"] }
+drag = "2"
+glib = "0.18"
+md5 = "0.7"
+sha2 = "0.10"

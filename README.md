@@ -18,6 +18,10 @@
   <img src="https://img.shields.io/badge/version-0.1.0-purple?style=flat-square" alt="v0.1.0" />
 </p>
 
+<p align="center">
+  <img src="gh-images/luzumi.png" alt="Luzumi screenshot" width="800" />
+</p>
+
 ---
 
 ## What is Luzumi?

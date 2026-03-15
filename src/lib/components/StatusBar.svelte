@@ -85,7 +85,38 @@
     {/if}
   </div>
 
+  <div class="center">
+    {#if fm.gitStatus?.is_repo}
+      <span class="git-badge">
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+          <circle cx="5" cy="5" r="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+          <circle cx="11" cy="11" r="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+          <path d="M5 7V9C5 10.1 5.9 11 7 11H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        {fm.gitStatus.branch}
+        {#if fm.gitStatus.modified.length > 0}<span class="git-mod">+{fm.gitStatus.modified.length}</span>{/if}
+        {#if fm.gitStatus.staged.length > 0}<span class="git-staged">~{fm.gitStatus.staged.length}</span>{/if}
+        {#if fm.gitStatus.untracked.length > 0}<span class="git-untracked">?{fm.gitStatus.untracked.length}</span>{/if}
+      </span>
+    {/if}
+    {#if fm.diskSpace}
+      <span class="disk-badge">{formatSize(fm.diskSpace.available)} {t.free} {t.of} {formatSize(fm.diskSpace.total)}</span>
+    {/if}
+  </div>
+
   <div class="right">
+    {#if fm.viewMode === "grid"}
+      <input
+        type="range"
+        class="zoom-slider"
+        min="48"
+        max="128"
+        step="8"
+        value={fm.gridIconSize}
+        oninput={(e) => { fm.gridIconSize = parseInt((e.target as HTMLInputElement).value); try { localStorage.setItem("luzumi_icon_size", String(fm.gridIconSize)); } catch {} }}
+        title="Icon size: {fm.gridIconSize}px"
+      />
+    {/if}
     <button
       class="view-btn"
       class:active={fm.viewMode === "list"}
@@ -222,6 +253,64 @@
     display: flex;
     align-items: center;
     gap: 4px;
+  }
+
+  .center {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .git-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 7px 1px 5px;
+    border-radius: 4px;
+    background: rgba(166, 218, 149, 0.1);
+    color: var(--green);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .git-mod {
+    color: var(--yellow);
+    font-weight: 700;
+  }
+
+  .git-staged {
+    color: var(--green);
+    font-weight: 700;
+  }
+
+  .git-untracked {
+    color: var(--overlay1);
+    font-weight: 700;
+  }
+
+  .disk-badge {
+    font-size: 10px;
+    color: var(--overlay1);
+  }
+
+  .zoom-slider {
+    width: 64px;
+    height: 4px;
+    appearance: none;
+    background: var(--surface1);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+    margin-right: 6px;
+  }
+
+  .zoom-slider::-webkit-slider-thumb {
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
   }
 
   .right {

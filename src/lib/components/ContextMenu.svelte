@@ -43,6 +43,44 @@
     openWithApps = [];
   }
 
+  let menuEl = $state<HTMLElement | null>(null);
+  let positioned = $state(false);
+  let adjustedX = $state(0);
+  let adjustedY = $state(0);
+
+  $effect(() => {
+    if (menu) {
+      // Reset: menu starts hidden, will be positioned after measurement
+      positioned = false;
+      adjustedX = menu.x;
+      adjustedY = menu.y;
+    }
+  });
+
+  $effect(() => {
+    if (menu && menuEl && !positioned) {
+      // Use two rAFs to ensure DOM is fully laid out before measuring
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!menuEl || !menu) return;
+          const rect = menuEl.getBoundingClientRect();
+          const pad = 8;
+          let x = menu.x;
+          let y = menu.y;
+          if (x + rect.width > window.innerWidth - pad) {
+            x = Math.max(pad, window.innerWidth - rect.width - pad);
+          }
+          if (y + rect.height > window.innerHeight - pad) {
+            y = Math.max(pad, window.innerHeight - rect.height - pad);
+          }
+          adjustedX = x;
+          adjustedY = y;
+          positioned = true;
+        });
+      });
+    }
+  });
+
   const hasClipboard = $derived(!!fm.clipboard);
   const singleSelected = $derived(
     fm.selected.size === 1
@@ -59,7 +97,8 @@
 {#if menu}
   <div
     class="menu"
-    style="left: {menu.x}px; top: {menu.y}px"
+    bind:this={menuEl}
+    style="left: {adjustedX}px; top: {adjustedY}px; visibility: {positioned ? 'visible' : 'hidden'}"
     role="menu"
     tabindex="0"
     onclick={(e) => e.stopPropagation()}
@@ -214,7 +253,7 @@
         <span class="hint">Shift+Del</span>
       </button>
       <div class="sep"></div>
-      <button class="menu-item" onclick={() => action(() => { fm.showProperties = tgt2; })}>
+      <button class="menu-item" onclick={() => { const entry = tgt2; close(); setTimeout(() => { fm.showProperties = entry; }, 0); }}>
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M8 7V11M8 5V5.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
         {t.properties}
       </button>

@@ -64,7 +64,7 @@
     <div class="preview-header">
       <span class="file-name" title={selectedEntry.name}>{selectedEntry.name}</span>
       <span class="file-meta">
-        {#if selectedEntry.kind === "file"}{formatSize(selectedEntry.size)}{:else}{t.folderSize}{/if}
+        {#if selectedEntry.kind === "file"}{formatSize(selectedEntry.size ?? 0)}{:else}{t.folderSize}{/if}
       </span>
     </div>
 

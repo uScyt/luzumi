@@ -31,26 +31,33 @@
   import KeyboardShortcutsDialog from "./lib/components/dialogs/KeyboardShortcutsDialog.svelte";
   import SelectPatternDialog from "./lib/components/dialogs/SelectPatternDialog.svelte";
   import PreviewPane from "./lib/components/PreviewPane.svelte";
+  import SplitPane from "./lib/components/SplitPane.svelte";
   import PickerFooter from "./lib/components/PickerFooter.svelte";
 
   const win = getCurrentWindow();
 
-  onMount(async () => {
-    await fm.init();
-    const unlisten1 = await listen<{ current: string; done: number; total: number }>("delete-progress", (ev) => {
-      if (fm.deleteProgress) {
-        fm.deleteProgress = ev.payload;
-      }
-    });
-    const unlisten2 = await listen<{ current: string; done: number; total: number }>("copy-move-progress", (ev) => {
-      const p = ev.payload;
-      if (p.done >= p.total) {
-        fm.copyMoveProgress = null;
-      } else {
-        fm.copyMoveProgress = p;
-      }
-    });
-    return () => { unlisten1(); unlisten2(); fm.destroy(); };
+  onMount(() => {
+    let unlisten1: (() => void) | undefined;
+    let unlisten2: (() => void) | undefined;
+
+    (async () => {
+      await fm.init();
+      unlisten1 = await listen<{ current: string; done: number; total: number }>("delete-progress", (ev) => {
+        if (fm.deleteProgress) {
+          fm.deleteProgress = ev.payload;
+        }
+      });
+      unlisten2 = await listen<{ current: string; done: number; total: number }>("copy-move-progress", (ev) => {
+        const p = ev.payload;
+        if (p.done >= p.total) {
+          fm.copyMoveProgress = null;
+        } else {
+          fm.copyMoveProgress = p;
+        }
+      });
+    })();
+
+    return () => { unlisten1?.(); unlisten2?.(); fm.destroy(); };
   });
 
   function onKeydown(e: KeyboardEvent) {
@@ -116,6 +123,7 @@
     if (e.ctrlKey && e.key === "2") { e.preventDefault(); fm.viewMode = "grid"; }
     if (e.ctrlKey && e.shiftKey && e.key === "N") { e.preventDefault(); fm.showNewFolder = true; fm.newFolderName = "New Folder"; }
     if (e.key === "F5") { e.preventDefault(); fm.reload(); }
+    if (e.key === "F3") { e.preventDefault(); fm.toggleSplitView(); }
     if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); fm.goBack(); }
     if (e.altKey && e.key === "ArrowRight") { e.preventDefault(); fm.goForward(); }
     if (e.altKey && e.key === "ArrowUp") { e.preventDefault(); fm.goUp(); }
@@ -166,9 +174,10 @@
     <TabBar />
   {/if}
   <Toolbar />
-  <div class="main-area" class:with-preview={fm.showPreview && !fm.isPickerMode}>
+  <div class="main-area" class:with-preview={fm.showPreview && !fm.isPickerMode} class:with-split={fm.splitView && !fm.isPickerMode}>
     <Sidebar />
-    <main class="content">
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <main class="content" onclick={() => { fm.splitFocused = false; }} onkeydown={() => {}}>
       {#if fm.showDefaultBanner && !fm.showTrashView && !fm.isPickerMode}
         <DefaultBanner />
       {/if}
@@ -197,7 +206,7 @@
                 title={entry.path}
               >
                 <span class="global-result-icon" style="color: {getFileColor(entry)}">
-                  {@html renderIcon(getFileIcon(entry), 16)}
+                  {@html renderIcon(getFileIcon(entry))}
                 </span>
                 <span class="global-result-name">{entry.name}</span>
                 <span class="global-result-path">{entry.path.substring(0, entry.path.lastIndexOf("/"))}</span>
@@ -207,6 +216,9 @@
         </div>
       {/if}
     </main>
+    {#if fm.splitView && !fm.isPickerMode}
+      <SplitPane />
+    {/if}
     {#if fm.showPreview && !fm.isPickerMode}
       <PreviewPane />
     {/if}
@@ -392,6 +404,14 @@
 
   .main-area.with-preview {
     grid-template-columns: 220px 1fr 280px;
+  }
+
+  .main-area.with-split {
+    grid-template-columns: 220px 1fr 1fr;
+  }
+
+  .main-area.with-split.with-preview {
+    grid-template-columns: 220px 1fr 1fr 280px;
   }
 
   .content {

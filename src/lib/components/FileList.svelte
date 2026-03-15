@@ -4,6 +4,7 @@
   import type { FileEntry } from "../types";
   import { t } from "../i18n";
   import { renderIcon } from "../icons";
+  import FileTooltip from "./FileTooltip.svelte";
 
   // Rubber band selection
   let containerEl: HTMLElement;
@@ -53,6 +54,28 @@
   }
 
   let renameInput = $state<HTMLInputElement | null>(null);
+
+  // Tooltip
+  let tooltipEntry = $state<FileEntry | null>(null);
+  let tooltipPos = $state({ x: 0, y: 0 });
+  let tooltipTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function onRowMouseEnter(e: MouseEvent, entry: FileEntry) {
+    if (tooltipTimer) clearTimeout(tooltipTimer);
+    tooltipTimer = setTimeout(() => {
+      tooltipEntry = entry;
+      tooltipPos = { x: e.clientX, y: e.clientY };
+    }, 500);
+  }
+
+  function onRowMouseLeave() {
+    if (tooltipTimer) { clearTimeout(tooltipTimer); tooltipTimer = null; }
+    tooltipEntry = null;
+  }
+
+  function onRowMouseMove(e: MouseEvent) {
+    if (tooltipEntry) tooltipPos = { x: e.clientX, y: e.clientY };
+  }
 
   function startRename(entry: FileEntry) {
     fm.startRename(entry);
@@ -111,8 +134,8 @@
       fm.selected = new Set([entry.path]);
     }
     fm.contextMenu = {
-      x: Math.min(e.clientX, window.innerWidth - 240),
-      y: Math.min(e.clientY, window.innerHeight - 320),
+      x: e.clientX,
+      y: e.clientY,
       target: entry,
     };
   }
@@ -186,12 +209,15 @@
           ondblclick={() => onRowDblClick(entry)}
           oncontextmenu={(e) => onContextMenu(e, entry)}
           onkeydown={(e) => onRowKeyDown(e, entry)}
-          ondragstart={(e) => { if (e.dataTransfer) { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", entry.path); } fm.setDragPaths(entry); }}
+          ondragstart={(e) => { if (e.dataTransfer) { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", entry.path); } fm.setDragPaths(entry); fm.startNativeDrag(entry); }}
           ondragend={() => { fm.dragPaths = []; fm.dropTarget = null; }}
           ondragenter={(e) => onRowDragEnter(e, entry)}
           ondragover={(e) => { if (entry.kind === "directory" && !fm.dragPaths.includes(entry.path)) { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; fm.dropTarget = entry.path; } }}
           ondragleave={() => { if (fm.dropTarget === entry.path) fm.dropTarget = null; }}
           ondrop={(e) => { if (entry.kind === "directory") { e.preventDefault(); e.stopPropagation(); fm.requestDrop(entry.path); } }}
+          onmouseenter={(e) => onRowMouseEnter(e, entry)}
+          onmouseleave={onRowMouseLeave}
+          onmousemove={onRowMouseMove}
         >
           <div class="col-icon">
             <div class="icon-wrap">
@@ -231,6 +257,10 @@
                 ondblclick={(e) => { e.stopPropagation(); startRename(entry); }}
                 title={entry.name}
               >{entry.name}</span>
+              {@const gitSt = fm.getGitFileStatus(entry.path)}
+              {#if gitSt}
+                <span class="git-dot git-{gitSt}" title={gitSt}></span>
+              {/if}
             {/if}
           </div>
 
@@ -266,6 +296,10 @@
     class="rubber-band"
     style="left:{left}px; top:{top}px; width:{width}px; height:{height}px;"
   ></div>
+{/if}
+
+{#if tooltipEntry}
+  <FileTooltip entry={tooltipEntry} x={tooltipPos.x} y={tooltipPos.y} />
 {/if}
 
 <style>
@@ -403,7 +437,19 @@
     overflow: hidden;
     display: flex;
     align-items: center;
+    gap: 6px;
   }
+
+  .git-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .git-modified { background: var(--yellow); }
+  .git-staged { background: var(--green); }
+  .git-untracked { background: var(--overlay1); }
 
   .file-name {
     overflow: hidden;

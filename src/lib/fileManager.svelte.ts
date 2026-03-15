@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { FileEntry, BookmarkEntry, DriveInfo, ContextMenuState } from "./types";
 import { t } from "./i18n";
 
@@ -97,6 +98,12 @@ class FileManager {
   private _searchDebounce: ReturnType<typeof setTimeout> | null = null;
   deleteProgress = $state<{ current: string; done: number; total: number } | null>(null);
   copyMoveProgress = $state<{ current: string; done: number; total: number } | null>(null);
+  diskSpace = $state<{ total: number; available: number; used: number } | null>(null);
+  gitStatus = $state<{ is_repo: boolean; branch: string; modified: string[]; staged: string[]; untracked: string[] } | null>(null);
+  splitView = $state(false);
+  splitPath = $state("");
+  splitEntries = $state<FileEntry[]>([]);
+  splitFocused = $state(false);
   gridIconSize = $state((() => {
     try {
       const v = parseInt(localStorage.getItem("luzumi_icon_size") ?? String(ICON_SIZE_DEFAULT));
@@ -503,6 +510,8 @@ class FileManager {
       this.folderSizes.clear();
       this.addRecentLocation(path);
       this.startWatch(path);
+      this.refreshDiskSpace(path);
+      this.refreshGitStatus(path);
     } catch (e) {
       this.error = String(e);
     } finally {
@@ -598,7 +607,7 @@ class FileManager {
 
   async rename(from: string, newName: string) {
     try {
-      const origName = from.split("/").pop()!;
+      const origName = baseName(from);
       const parent = parentDir(from);
       const cmd = this.elevated ? "cmd_elevated_rename" : "cmd_rename_entry";
       await invoke(cmd, { from, newName });
@@ -619,7 +628,7 @@ class FileManager {
         await invoke("cmd_elevated_delete", { paths });
         this.setStatus(t.deletedItems(paths.length));
       } else {
-        const fileNames = paths.map(p => p.split("/").pop()!);
+        const fileNames = paths.map(p => baseName(p));
         await invoke("cmd_delete_entries", { paths });
         this.pushUndo({ type: "trash", fileNames });
         this.setStatus(t.trashedItems(paths.length));
@@ -699,7 +708,7 @@ class FileManager {
         this.clipboard = null;
       } else {
         const moves = toProcess.map(p => ({
-          newPath: destDir + "/" + p.split("/").pop()!,
+          newPath: destDir + "/" + baseName(p),
           origParent: (parentDir(p)),
         }));
         const cmd = this.elevated ? "cmd_elevated_move" : "cmd_move_entries";
@@ -773,7 +782,7 @@ class FileManager {
     this.showDragDropDialog = false;
     try {
       const moves = paths.map(p => ({
-        newPath: dest + "/" + p.split("/").pop()!,
+        newPath: dest + "/" + baseName(p),
         origParent: (parentDir(p)),
       }));
       const cmd = this.elevated ? "cmd_elevated_move" : "cmd_move_entries";
@@ -820,13 +829,67 @@ class FileManager {
     }
   }
 
+  async startNativeDrag(entry: FileEntry) {
+    const paths = this.selected.has(entry.path) ? [...this.selected] : [entry.path];
+    try {
+      await invoke("cmd_start_drag", { paths });
+    } catch (_) {}
+  }
+
+  async refreshDiskSpace(path: string) {
+    try {
+      this.diskSpace = await invoke<{ total: number; available: number; used: number }>("cmd_get_disk_space", { path });
+    } catch { this.diskSpace = null; }
+  }
+
+  async refreshGitStatus(path: string) {
+    try {
+      this.gitStatus = await invoke<{ is_repo: boolean; branch: string; modified: string[]; staged: string[]; untracked: string[] } | null>("cmd_get_git_status", { path });
+    } catch { this.gitStatus = null; }
+  }
+
+  getGitFileStatus(filePath: string): string | null {
+    if (!this.gitStatus?.is_repo) return null;
+    const name = baseName(filePath);
+    if (this.gitStatus.staged.some(f => f === name || f.endsWith("/" + name))) return "staged";
+    if (this.gitStatus.modified.some(f => f === name || f.endsWith("/" + name))) return "modified";
+    if (this.gitStatus.untracked.some(f => f === name || f.endsWith("/" + name))) return "untracked";
+    return null;
+  }
+
+  toggleSplitView() {
+    this.splitView = !this.splitView;
+    if (this.splitView && !this.splitPath) {
+      this.splitPath = this.currentPath;
+      this.loadSplitEntries();
+    }
+  }
+
+  async loadSplitEntries() {
+    if (!this.splitPath) return;
+    try {
+      const entries: FileEntry[] = await invoke("cmd_list_directory", {
+        path: this.splitPath,
+        showHidden: this.showHidden,
+      });
+      this.splitEntries = entries;
+    } catch {
+      this.splitEntries = [];
+    }
+  }
+
+  async navigateSplit(path: string) {
+    this.splitPath = path;
+    await this.loadSplitEntries();
+  }
+
   async dropOnto(targetDir: string) {
     if (this.dragPaths.length === 0) return;
     if (this.dragPaths.includes(targetDir)) return;
     try {
       const dragged = [...this.dragPaths];
       const moves = dragged.map(p => ({
-        newPath: targetDir + "/" + p.split("/").pop()!,
+        newPath: targetDir + "/" + baseName(p),
         origParent: (parentDir(p)),
       }));
       const cmd = this.elevated ? "cmd_elevated_move" : "cmd_move_entries";
@@ -1240,6 +1303,231 @@ class FileManager {
       await this._loadTab(newIndex);
     } else if (index < this.activeTabIndex) {
       this.activeTabIndex = this.activeTabIndex - 1;
+    }
+  }
+
+  // --- Native context menu ---
+  private _nativeMenuTarget: FileEntry | null = null;
+  private _nativeMenuListenerSetup = false;
+
+  private _setupNativeMenuListener() {
+    if (this._nativeMenuListenerSetup) return;
+    this._nativeMenuListenerSetup = true;
+    listen<string>("context-menu-action", (event) => {
+      this._handleNativeMenuAction(event.payload);
+    });
+  }
+
+  private _handleNativeMenuAction(actionId: string) {
+    const target = this._nativeMenuTarget;
+
+    // Handle "Open With" app selections
+    if (actionId.startsWith("ow:") && target) {
+      const desktopId = actionId.slice(3);
+      invoke("cmd_open_with_app", { path: target.path, desktopId }).catch(() => {});
+      this._nativeMenuTarget = null;
+      return;
+    }
+
+    switch (actionId) {
+      case "open":
+        if (target) this.open(target);
+        break;
+      case "open-with":
+        if (target) this._showOpenWithMenu(target);
+        break;
+      case "enable-admin":
+        invoke("cmd_authenticate_admin").then(() => { this.elevated = true; }).catch(() => {});
+        break;
+      case "pin-quick-access":
+        if (target) this.addQuickAccess(target.name, target.path);
+        break;
+      case "unpin-quick-access":
+        if (target) this.removeQuickAccess(target.path);
+        break;
+      case "rename":
+        if (target) this.startRename(target);
+        break;
+      case "bulk-rename":
+        this.bulkRename();
+        break;
+      case "calculate-size":
+        if (target) this.calculateFolderSize(target.path);
+        break;
+      case "copy":
+        this.copySelected();
+        break;
+      case "duplicate":
+        this.duplicateSelected();
+        break;
+      case "save-copy-as":
+        if (target) this.openSaveAs(target.path);
+        break;
+      case "cut":
+        this.cutSelected();
+        break;
+      case "paste":
+        this.paste();
+        break;
+      case "copy-path":
+        if (target) navigator.clipboard.writeText(target.path);
+        break;
+      case "open-terminal":
+        this.openTerminal(target?.kind === "directory" ? target.path : undefined);
+        break;
+      case "compress":
+        this.compressSelected();
+        break;
+      case "extract-here":
+        if (target) this.extractArchive(target.path);
+        break;
+      case "move-to-trash":
+        this.deleteSelected();
+        break;
+      case "delete-permanently":
+        this.triggerSecureDelete();
+        break;
+      case "properties":
+        if (target) this.showProperties = target;
+        break;
+      case "new-folder":
+        this.showNewFolder = true;
+        this.newFolderName = "New Folder";
+        break;
+      case "new-file":
+        this.showNewFile = true;
+        this.newFileName = "untitled.txt";
+        break;
+      case "pin-current":
+        {
+          const name = this.currentPath.split("/").filter(Boolean).pop() || this.currentPath;
+          this.addQuickAccess(name, this.currentPath);
+        }
+        break;
+      case "invert-selection":
+        this.invertSelection();
+        break;
+      case "select-by-pattern":
+        this.showSelectPattern = true;
+        break;
+      case "find-duplicates":
+        this.findDuplicates();
+        break;
+    }
+    this._nativeMenuTarget = null;
+  }
+
+  async showNativeContextMenu(entry: FileEntry | null) {
+    this._setupNativeMenuListener();
+    this._nativeMenuTarget = entry;
+
+    const items: Array<{ id: string; label: string; enabled: boolean; separator: boolean }> = [];
+    const sep = () => items.push({ id: "", label: "", enabled: false, separator: true });
+    const item = (id: string, label: string, enabled = true) =>
+      items.push({ id, label, enabled, separator: false });
+
+    const hasClipboard = !!this.clipboard;
+    const singleSelected = this.selected.size === 1
+      ? this.entries.find((e) => this.selected.has(e.path)) ?? null
+      : null;
+    const isPinned = entry?.kind === "directory"
+      ? this.quickAccess.some(qa => qa.path === entry?.path)
+      : false;
+
+    if (entry) {
+      // Target menu
+      item("open", t.open);
+      item("open-with", entry.kind === "directory" ? t.openFolderWith : t.openWith);
+
+      if (!entry.isWritable && !this.elevated) {
+        item("enable-admin", t.enableAdmin);
+      }
+
+      if (entry.kind === "directory") {
+        item(isPinned ? "unpin-quick-access" : "pin-quick-access",
+             isPinned ? t.unpinQuickAccess : t.pinQuickAccess);
+      }
+
+      sep();
+
+      if (singleSelected) {
+        item("rename", `${t.rename}    F2`);
+      }
+      if (this.selected.size >= 2) {
+        item("bulk-rename", t.bulkRename);
+      }
+      if (singleSelected && singleSelected.kind === "directory") {
+        item("calculate-size", t.calculateSize);
+      }
+
+      sep();
+      item("copy", `${t.copy}    Ctrl+C`);
+      item("duplicate", `${t.duplicate}    Ctrl+D`);
+      if (entry.kind !== "directory") {
+        item("save-copy-as", t.saveCopyAs);
+      }
+      item("cut", `${t.cut}    Ctrl+X`);
+
+      if (hasClipboard) {
+        item("paste", `${t.paste}    Ctrl+V`);
+      }
+
+      sep();
+      item("copy-path", t.copyPath);
+      if (entry.kind === "directory") {
+        item("open-terminal", t.openTerminal);
+      }
+      item("compress", t.compress);
+      if (singleSelected && singleSelected.extension?.toLowerCase() === "zip") {
+        item("extract-here", t.extractHere);
+      }
+
+      sep();
+      item("move-to-trash", `${t.moveToTrash}    Del`);
+      item("delete-permanently", `${t.deletePermanently}    Shift+Del`);
+      sep();
+      item("properties", t.properties);
+    } else {
+      // Background menu
+      if (hasClipboard) {
+        item("paste", `${t.paste}    Ctrl+V`);
+        sep();
+      }
+      item("open-terminal", t.openTerminal);
+      item("new-folder", t.newFolder);
+      item("new-file", t.newFile);
+      item("pin-current", t.pinQuickAccess);
+      sep();
+      item("invert-selection", t.invertSelection);
+      item("select-by-pattern", t.selectByPattern);
+      sep();
+      item("find-duplicates", t.findDuplicates);
+    }
+
+    try {
+      await invoke("cmd_show_context_menu", { items });
+    } catch (e) {
+      console.error("Native context menu failed:", e);
+    }
+  }
+
+  private async _showOpenWithMenu(target: FileEntry) {
+    try {
+      const apps = await invoke<Array<{ desktop_id: string; name: string; icon: string; is_default: boolean }>>(
+        "cmd_list_open_with_apps", { path: target.path }
+      );
+      if (!apps || apps.length === 0) return;
+
+      const items: Array<{ id: string; label: string; enabled: boolean; separator: boolean }> = [];
+      for (const app of apps) {
+        const label = app.is_default ? `${app.name} (${t.open})` : app.name;
+        items.push({ id: `ow:${app.desktop_id}`, label, enabled: true, separator: false });
+      }
+
+      this._nativeMenuTarget = target;
+      await invoke("cmd_show_context_menu", { items });
+    } catch (e) {
+      console.error("Open with menu failed:", e);
     }
   }
 }

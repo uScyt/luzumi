@@ -9,7 +9,9 @@
 
   let details = $state<FileDetails | null>(null);
   let thumb = $state<string | null>(null);
-  let activeTab = $state<"general" | "permissions">("general");
+  let activeTab = $state<"general" | "permissions" | "checksums">("general");
+  let checksums = $state<{ md5: string; sha256: string } | null>(null);
+  let checksumLoading = $state(false);
 
   const IMAGE_EXTS = new Set(["png","jpg","jpeg","gif","webp","bmp","svg","ico"]);
 
@@ -105,6 +107,9 @@
     <div class="tabs">
       <button class="tab" class:active={activeTab === "general"} onclick={() => activeTab = "general"}>{t.general}</button>
       <button class="tab" class:active={activeTab === "permissions"} onclick={() => activeTab = "permissions"}>{t.permissions}</button>
+      {#if entry.kind === "file"}
+        <button class="tab" class:active={activeTab === "checksums"} onclick={() => { activeTab = "checksums"; if (!checksums && !checksumLoading) { checksumLoading = true; invoke<{ md5: string; sha256: string }>("cmd_compute_checksum", { path: entry.path }).then(r => { checksums = r; }).catch(() => {}).finally(() => { checksumLoading = false; }); } }}>Checksums</button>
+      {/if}
     </div>
 
     {#if activeTab === "general"}
@@ -168,7 +173,7 @@
         </div>
       </div>
 
-    {:else}
+    {:else if activeTab === "permissions"}
       <div class="tab-content">
         {#if details}
           <div class="info-section">
@@ -230,6 +235,44 @@
           </div>
         {:else}
           <div class="loading-state">{t.loading}</div>
+        {/if}
+      </div>
+    {:else if activeTab === "checksums"}
+      <div class="tab-content">
+        {#if checksumLoading}
+          <div class="loading-state">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" class="spin">
+              <path d="M8 2A6 6 0 1 0 14 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+            Computing...
+          </div>
+        {:else if checksums}
+          <div class="info-section">
+            <div class="checksum-row">
+              <span class="checksum-label">MD5</span>
+              <div class="checksum-value-wrap">
+                <code class="checksum-value">{checksums.md5}</code>
+                <button class="copy-hash-btn" title="Copy" onclick={() => { if (checksums) navigator.clipboard.writeText(checksums.md5); }}>
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                    <rect x="5" y="5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M11 5V3.5C11 2.67 10.33 2 9.5 2H3.5C2.67 2 2 2.67 2 3.5V9.5C2 10.33 2.67 11 3.5 11H5" stroke="currentColor" stroke-width="1.5"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="checksum-row">
+              <span class="checksum-label">SHA-256</span>
+              <div class="checksum-value-wrap">
+                <code class="checksum-value">{checksums.sha256}</code>
+                <button class="copy-hash-btn" title="Copy" onclick={() => { if (checksums) navigator.clipboard.writeText(checksums.sha256); }}>
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                    <rect x="5" y="5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M11 5V3.5C11 2.67 10.33 2 9.5 2H3.5C2.67 2 2 2.67 2 3.5V9.5C2 10.33 2.67 11 3.5 11H5" stroke="currentColor" stroke-width="1.5"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
         {/if}
       </div>
     {/if}
@@ -538,4 +581,62 @@
   }
 
   .btn-ok:hover { opacity: 0.88; }
+
+  .checksum-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 14px;
+  }
+
+  .checksum-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--overlay0);
+  }
+
+  .checksum-value-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .checksum-value {
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--subtext0);
+    background: rgba(54, 58, 79, 0.3);
+    padding: 6px 10px;
+    border-radius: 6px;
+    word-break: break-all;
+    flex: 1;
+    user-select: all;
+  }
+
+  .copy-hash-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--overlay1);
+    flex-shrink: 0;
+    transition: background 0.1s, color 0.1s;
+  }
+
+  .copy-hash-btn:hover {
+    background: var(--hover-bg);
+    color: var(--text);
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .spin {
+    animation: spin 0.8s linear infinite;
+  }
 </style>

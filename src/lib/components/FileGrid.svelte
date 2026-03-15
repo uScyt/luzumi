@@ -5,6 +5,7 @@
   import type { FileEntry } from "../types";
   import { t } from "../i18n";
   import { renderIcon } from "../icons";
+  import FileTooltip from "./FileTooltip.svelte";
 
   const IMAGE_EXTS = new Set(["png","jpg","jpeg","gif","webp","bmp","svg","ico","tiff","tif","heic","heif","avif","jxl"]);
 
@@ -83,6 +84,28 @@
 
   let renameInput = $state<HTMLInputElement | null>(null);
 
+  // Tooltip
+  let tooltipEntry = $state<FileEntry | null>(null);
+  let tooltipPos = $state({ x: 0, y: 0 });
+  let tooltipTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function onCardMouseEnter(e: MouseEvent, entry: FileEntry) {
+    if (tooltipTimer) clearTimeout(tooltipTimer);
+    tooltipTimer = setTimeout(() => {
+      tooltipEntry = entry;
+      tooltipPos = { x: e.clientX, y: e.clientY };
+    }, 500);
+  }
+
+  function onCardMouseLeave() {
+    if (tooltipTimer) { clearTimeout(tooltipTimer); tooltipTimer = null; }
+    tooltipEntry = null;
+  }
+
+  function onCardMouseMove(e: MouseEvent) {
+    if (tooltipEntry) tooltipPos = { x: e.clientX, y: e.clientY };
+  }
+
   function startRename(entry: FileEntry) {
     fm.startRename(entry);
     requestAnimationFrame(() => {
@@ -115,8 +138,8 @@
       fm.selected = new Set([entry.path]);
     }
     fm.contextMenu = {
-      x: Math.min(e.clientX, window.innerWidth - 240),
-      y: Math.min(e.clientY, window.innerHeight - 320),
+      x: e.clientX,
+      y: e.clientY,
       target: entry,
     };
   }
@@ -126,6 +149,7 @@
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", entry.path);
     fm.setDragPaths(entry);
+    fm.startNativeDrag(entry);
   }
 
   function onBgDragOver(e: DragEvent) {
@@ -186,7 +210,7 @@
     <button
       class="sort-btn"
       class:active={fm.sortBy === field}
-      onclick={() => fm.setSort(field)}
+      onclick={() => fm.setSort(field as "name" | "size" | "date" | "type")}
     >
       {label}
       {#if fm.sortBy === field}<span class="sort-arrow">{fm.sortDir === 'asc' ? '↑' : '↓'}</span>{/if}
@@ -261,6 +285,9 @@
           ondragover={(e) => onCardDragOver(e, entry)}
           ondragleave={() => { if (fm.dropTarget === entry.path) fm.dropTarget = null; }}
           ondrop={(e) => onCardDrop(e, entry)}
+          onmouseenter={(e) => onCardMouseEnter(e, entry)}
+          onmouseleave={onCardMouseLeave}
+          onmousemove={onCardMouseMove}
         >
           <div class="card-icon" class:folder={entry.kind === "directory"} class:has-thumb={showThumb}>
             {#if showThumb}
@@ -305,6 +332,10 @@
               title={entry.name}
               ondblclick={(e) => { e.stopPropagation(); startRename(entry); }}
             >{entry.name}</span>
+            {@const gitSt = fm.getGitFileStatus(entry.path)}
+            {#if gitSt}
+              <span class="git-dot git-{gitSt}"></span>
+            {/if}
           {/if}
         </div>
       {/each}
@@ -321,6 +352,10 @@
     class="rubber-band"
     style="left:{left}px; top:{top}px; width:{width}px; height:{height}px;"
   ></div>
+{/if}
+
+{#if tooltipEntry}
+  <FileTooltip entry={tooltipEntry} x={tooltipPos.x} y={tooltipPos.y} />
 {/if}
 
 <style>
@@ -516,6 +551,26 @@
     height: 300px;
     color: var(--overlay1);
     font-size: 14px;
+  }
+
+  .git-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+
+  .git-dot.git-modified {
+    background: var(--yellow);
+  }
+
+  .git-dot.git-staged {
+    background: var(--green);
+  }
+
+  .git-dot.git-untracked {
+    background: var(--overlay1);
   }
 
   :global(.rubber-band) {

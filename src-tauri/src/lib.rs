@@ -6,6 +6,7 @@ use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::Emitter;
+use tauri::menu::{MenuBuilder, MenuItem};
 use filesystem::{
     BookmarkEntry, DriveInfo, FileEntry, FileDetails, DuplicateGroup,
     read_directory, elevated_read_directory, create_directory, rename_entry,
@@ -958,6 +959,171 @@ fn cmd_get_themes_dir() -> String {
     themes_dir().to_string_lossy().to_string()
 }
 
+#[derive(Clone, serde::Serialize)]
+struct ChecksumResult {
+    md5: String,
+    sha256: String,
+}
+
+#[tauri::command]
+fn cmd_compute_checksum(path: String) -> Result<ChecksumResult, String> {
+    use sha2::Digest;
+    use std::io::Read;
+    let mut file = fs::File::open(&path).map_err(|e| e.to_string())?;
+    let mut md5_ctx = md5::Context::new();
+    let mut sha256_ctx = sha2::Sha256::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = file.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 { break; }
+        md5_ctx.consume(&buf[..n]);
+        sha256_ctx.update(&buf[..n]);
+    }
+    Ok(ChecksumResult {
+        md5: format!("{:x}", md5_ctx.compute()),
+        sha256: format!("{:x}", sha256_ctx.finalize()),
+    })
+}
+
+#[derive(Clone, serde::Serialize)]
+struct DiskSpaceInfo {
+    total: u64,
+    available: u64,
+    used: u64,
+}
+
+#[tauri::command]
+fn cmd_get_disk_space(path: String) -> Result<DiskSpaceInfo, String> {
+    use std::mem::MaybeUninit;
+    let c_path = std::ffi::CString::new(path).map_err(|e| e.to_string())?;
+    let mut stat = MaybeUninit::<libc::statvfs>::uninit();
+    let ret = unsafe { libc::statvfs(c_path.as_ptr(), stat.as_mut_ptr()) };
+    if ret != 0 {
+        return Err("Failed to get disk space".into());
+    }
+    let stat = unsafe { stat.assume_init() };
+    let total = stat.f_blocks as u64 * stat.f_frsize as u64;
+    let available = stat.f_bavail as u64 * stat.f_frsize as u64;
+    Ok(DiskSpaceInfo {
+        total,
+        available,
+        used: total - (stat.f_bfree as u64 * stat.f_frsize as u64),
+    })
+}
+
+#[derive(Clone, serde::Serialize)]
+struct GitStatusInfo {
+    is_repo: bool,
+    branch: String,
+    modified: Vec<String>,
+    staged: Vec<String>,
+    untracked: Vec<String>,
+}
+
+#[tauri::command]
+fn cmd_get_git_status(path: String) -> Option<GitStatusInfo> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .current_dir(&path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let branch = std::process::Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(&path)
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+
+    let status_output = std::process::Command::new("git")
+        .args(["status", "--porcelain", "-uall"])
+        .current_dir(&path)
+        .output()
+        .ok()?;
+    let status_str = String::from_utf8_lossy(&status_output.stdout);
+
+    let mut modified = Vec::new();
+    let mut staged = Vec::new();
+    let mut untracked = Vec::new();
+
+    for line in status_str.lines() {
+        if line.len() < 4 { continue; }
+        let (index, work) = (line.as_bytes()[0], line.as_bytes()[1]);
+        let file = if line.is_char_boundary(3) {
+            line[3..].to_string()
+        } else {
+            continue;
+        };
+        match (index, work) {
+            (b'?', b'?') => untracked.push(file),
+            (b' ', b'M') | (b' ', b'D') => modified.push(file),
+            (b'M', _) | (b'A', _) | (b'D', _) | (b'R', _) => staged.push(file),
+            _ => {
+                if work == b'M' || work == b'D' { modified.push(file); }
+            }
+        }
+    }
+
+    Some(GitStatusInfo {
+        is_repo: true,
+        branch,
+        modified,
+        staged,
+        untracked,
+    })
+}
+
+#[tauri::command]
+async fn cmd_start_drag(window: tauri::Window, paths: Vec<String>) -> Result<(), String> {
+    let file_paths: Vec<std::path::PathBuf> = paths.iter().map(std::path::PathBuf::from).collect();
+    if file_paths.is_empty() {
+        return Err("No files to drag".into());
+    }
+
+    let gtk_window = window.gtk_window().map_err(|e| format!("Failed to get GTK window: {}", e))?;
+
+    glib::idle_add_local_once(move || {
+        let _ = drag::start_drag(
+            &gtk_window,
+            drag::DragItem::Files(file_paths),
+            drag::Image::Raw(Vec::new()),
+            |_result, _cursor| {},
+            drag::Options::default(),
+        );
+    });
+
+    Ok(())
+}
+
+#[derive(Clone, serde::Deserialize)]
+struct NativeMenuItem {
+    id: String,
+    label: String,
+    enabled: bool,
+    separator: bool,
+}
+
+#[tauri::command]
+fn cmd_show_context_menu(window: tauri::Window, items: Vec<NativeMenuItem>) -> Result<(), String> {
+    let mut builder = MenuBuilder::new(&window);
+    for item in &items {
+        if item.separator {
+            builder = builder.separator();
+        } else {
+            let mi = MenuItem::with_id(&window, &item.id, &item.label, item.enabled, None::<&str>)
+                .map_err(|e| e.to_string())?;
+            builder = builder.item(&mi);
+        }
+    }
+    let menu = builder.build().map_err(|e| e.to_string())?;
+    window.popup_menu(&menu).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn run() {
     // Ignore SIGPIPE to prevent crashes when writing to closed pipes (e.g., root shell)
     #[cfg(unix)]
@@ -969,6 +1135,9 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(Mutex::new(picker_config))
+        .on_menu_event(|app, event| {
+            let _ = app.emit("context-menu-action", event.id().0.clone());
+        })
         .invoke_handler(tauri::generate_handler![
             list_directory,
             cmd_elevated_list_directory,
@@ -1026,6 +1195,11 @@ pub fn run() {
             cmd_list_themes,
             cmd_read_theme,
             cmd_get_themes_dir,
+            cmd_start_drag,
+            cmd_compute_checksum,
+            cmd_get_disk_space,
+            cmd_get_git_status,
+            cmd_show_context_menu,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
