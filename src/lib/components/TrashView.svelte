@@ -1,7 +1,29 @@
 <script lang="ts">
+  import { invoke } from "@tauri-apps/api/core";
   import { fm } from "../fileManager.svelte";
   import { formatSize, formatDate, getFileIcon, getFileColor } from "../types";
   import { t } from "../i18n";
+
+  interface TrashItemInfo {
+    originalPath: string | null;
+    deletionDate: string | null;
+  }
+
+  let trashInfo = $state<Map<string, TrashItemInfo>>(new Map());
+
+  $effect(() => {
+    const entries = fm.trashEntries;
+    if (entries.length === 0) { trashInfo = new Map(); return; }
+    const newMap = new Map<string, TrashItemInfo>();
+    for (const entry of entries) {
+      invoke<TrashItemInfo>("cmd_get_trash_item_info", { fileName: entry.name })
+        .then((info) => {
+          newMap.set(entry.name, info);
+          trashInfo = new Map(newMap);
+        })
+        .catch(() => {});
+    }
+  });
 
   const svgPaths: Record<string, string> = {
     Folder:        `<path d="M2 5C2 4.45 2.45 4 3 4H7L9 6H13C13.55 6 14 6.45 14 7V12C14 12.55 13.55 13 13 13H3C2.45 13 2 12.55 2 12V5Z" fill="currentColor" opacity=".2" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>`,
@@ -68,6 +90,7 @@
       {#each fm.trashEntries as entry (entry.path)}
         {@const iconName = getFileIcon(entry)}
         {@const iconColor = getFileColor(entry)}
+        {@const info = trashInfo.get(entry.name)}
         <div class="trash-row">
           <div class="trash-icon">
             <svg width="18" height="18" viewBox="0 0 16 16" style="color: {iconColor}">
@@ -75,8 +98,15 @@
             </svg>
           </div>
           <div class="trash-info">
-            <span class="trash-name" title={entry.name}>{entry.name}</span>
-            <span class="trash-meta">{entry.size != null ? formatSize(entry.size) : ""} {entry.modified ? formatDate(entry.modified) : ""}</span>
+            <span class="trash-name" title={info?.originalPath ?? entry.name}>{entry.name}</span>
+            <span class="trash-meta">
+              {entry.size != null ? formatSize(entry.size) : ""}
+              {#if info?.deletionDate}
+                <span class="trash-date">{info.deletionDate.replace("T", " ").slice(0, 16)}</span>
+              {:else if entry.modified}
+                {formatDate(entry.modified)}
+              {/if}
+            </span>
           </div>
           <button class="restore-btn" title={t.restore} onclick={() => fm.restoreFromTrash(entry.name)}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -280,5 +310,10 @@
   .restore-btn:hover {
     background: var(--success-bg);
     color: var(--green);
+  }
+
+  .trash-date {
+    color: var(--overlay0);
+    font-size: 10px;
   }
 </style>

@@ -12,6 +12,10 @@
   let activeTab = $state<"general" | "permissions" | "checksums">("general");
   let checksums = $state<{ md5: string; sha256: string } | null>(null);
   let checksumLoading = $state(false);
+  let detailsError = $state("");
+  let editing = $state(false);
+  let editMode = $state(0o644);
+  let permError = $state("");
 
   const IMAGE_EXTS = new Set(["png","jpg","jpeg","gif","webp","bmp","svg","ico"]);
 
@@ -46,13 +50,13 @@
 
   $effect(() => {
     invoke<FileDetails>("cmd_get_file_details", { path: entry.path })
-      .then((d) => { details = d; })
-      .catch(() => {});
+      .then((d) => { details = d; editMode = d.permissionsMode; })
+      .catch((e) => { detailsError = String(e); });
 
     if (entry.kind === "file" && entry.extension && IMAGE_EXTS.has(entry.extension.toLowerCase())) {
       invoke<string>("cmd_read_thumbnail", { path: entry.path })
         .then((d) => { thumb = d; })
-        .catch(() => {});
+        .catch(() => {}); // thumbnail failure is non-critical
     }
   });
 
@@ -146,7 +150,12 @@
           {#if details?.linkTarget}
             <div class="prop-row">
               <span class="label">{t.target}</span>
-              <span class="value mono">{details.linkTarget}</span>
+              <span class="value mono">
+                {details.linkTarget}
+                {#if details.linkTargetExists === false}
+                  <span class="broken-link">(broken)</span>
+                {/if}
+              </span>
             </div>
           {/if}
         </div>
@@ -175,7 +184,9 @@
 
     {:else if activeTab === "permissions"}
       <div class="tab-content">
-        {#if details}
+        {#if detailsError}
+          <div class="error-state">{detailsError}</div>
+        {:else if details}
           <div class="info-section">
             <div class="prop-row">
               <span class="label">{t.owner}</span>
@@ -190,32 +201,94 @@
           <div class="divider"></div>
 
           <div class="info-section">
-            <div class="perm-display">
-              <span class="perm-octal">{formatOctal(details.permissions)}</span>
-              <span class="perm-string">{details.permissions}</span>
-            </div>
+            {#if editing}
+              {@const bits = [
+                { label: t.owner, r: 0o400, w: 0o200, x: 0o100 },
+                { label: t.group, r: 0o040, w: 0o020, x: 0o010 },
+                { label: t.others, r: 0o004, w: 0o002, x: 0o001 },
+              ]}
+              <div class="perm-display">
+                <input class="perm-octal-input" type="text" value={((editMode & 0o777).toString(8)).padStart(3, '0')} oninput={(e) => { const v = parseInt((e.target as HTMLInputElement).value, 8); if (!isNaN(v) && v >= 0 && v <= 0o777) editMode = (editMode & ~0o777) | v; }} />
+              </div>
 
-            <div class="perm-grid">
-              <div class="perm-header"></div>
-              <div class="perm-header">{t.read}</div>
-              <div class="perm-header">{t.write}</div>
-              <div class="perm-header">{t.execute}</div>
+              <div class="perm-grid">
+                <div class="perm-header"></div>
+                <div class="perm-header">{t.read}</div>
+                <div class="perm-header">{t.write}</div>
+                <div class="perm-header">{t.execute}</div>
 
-              <div class="perm-label">{t.owner}</div>
-              <div class="perm-cell" class:granted={details.permissions[0] === 'r'}>{details.permissions[0]}</div>
-              <div class="perm-cell" class:granted={details.permissions[1] === 'w'}>{details.permissions[1]}</div>
-              <div class="perm-cell" class:granted={details.permissions[2] === 'x'}>{details.permissions[2]}</div>
+                {#each bits as bit}
+                  <div class="perm-label">{bit.label}</div>
+                  <div class="perm-cell-edit"><input type="checkbox" checked={(editMode & bit.r) !== 0} onchange={() => { editMode = editMode ^ bit.r; }} /></div>
+                  <div class="perm-cell-edit"><input type="checkbox" checked={(editMode & bit.w) !== 0} onchange={() => { editMode = editMode ^ bit.w; }} /></div>
+                  <div class="perm-cell-edit"><input type="checkbox" checked={(editMode & bit.x) !== 0} onchange={() => { editMode = editMode ^ bit.x; }} /></div>
+                {/each}
+              </div>
 
-              <div class="perm-label">{t.group}</div>
-              <div class="perm-cell" class:granted={details.permissions[3] === 'r'}>{details.permissions[3]}</div>
-              <div class="perm-cell" class:granted={details.permissions[4] === 'w'}>{details.permissions[4]}</div>
-              <div class="perm-cell" class:granted={details.permissions[5] === 'x'}>{details.permissions[5]}</div>
+              {#if permError}
+                <div class="perm-error">{permError}</div>
+              {/if}
 
-              <div class="perm-label">{t.others}</div>
-              <div class="perm-cell" class:granted={details.permissions[6] === 'r'}>{details.permissions[6]}</div>
-              <div class="perm-cell" class:granted={details.permissions[7] === 'w'}>{details.permissions[7]}</div>
-              <div class="perm-cell" class:granted={details.permissions[8] === 'x'}>{details.permissions[8]}</div>
-            </div>
+              <div class="perm-actions">
+                <button class="btn-cancel" onclick={() => { editing = false; editMode = details?.permissionsMode ?? 0o644; permError = ""; }}>Cancel</button>
+                <button class="btn-save" onclick={async () => {
+                  try {
+                    await invoke("cmd_set_permissions", { path: entry.path, mode: editMode });
+                    const d = await invoke<FileDetails>("cmd_get_file_details", { path: entry.path });
+                    details = d;
+                    editMode = d.permissionsMode;
+                    editing = false;
+                    permError = "";
+                  } catch (e) {
+                    const msg = String(e);
+                    if (msg.includes("ermission")) {
+                      try {
+                        await invoke("cmd_elevated_set_permissions", { path: entry.path, mode: editMode });
+                        const d = await invoke<FileDetails>("cmd_get_file_details", { path: entry.path });
+                        details = d;
+                        editMode = d.permissionsMode;
+                        editing = false;
+                        permError = "";
+                      } catch (e2) { permError = String(e2); }
+                    } else {
+                      permError = msg;
+                    }
+                  }
+                }}>Save</button>
+              </div>
+            {:else}
+              <div class="perm-display">
+                <span class="perm-octal">{formatOctal(details.permissions)}</span>
+                <span class="perm-string">{details.permissions}</span>
+                <button class="edit-perm-btn" title="Edit permissions" onclick={() => { editing = true; editMode = details?.permissionsMode ?? 0o644; }}>
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                    <path d="M11.5 1.5L14.5 4.5L5 14H2V11L11.5 1.5Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+              </div>
+
+              <div class="perm-grid">
+                <div class="perm-header"></div>
+                <div class="perm-header">{t.read}</div>
+                <div class="perm-header">{t.write}</div>
+                <div class="perm-header">{t.execute}</div>
+
+                <div class="perm-label">{t.owner}</div>
+                <div class="perm-cell" class:granted={details.permissions[0] === 'r'}>{details.permissions[0]}</div>
+                <div class="perm-cell" class:granted={details.permissions[1] === 'w'}>{details.permissions[1]}</div>
+                <div class="perm-cell" class:granted={details.permissions[2] === 'x'}>{details.permissions[2]}</div>
+
+                <div class="perm-label">{t.group}</div>
+                <div class="perm-cell" class:granted={details.permissions[3] === 'r'}>{details.permissions[3]}</div>
+                <div class="perm-cell" class:granted={details.permissions[4] === 'w'}>{details.permissions[4]}</div>
+                <div class="perm-cell" class:granted={details.permissions[5] === 'x'}>{details.permissions[5]}</div>
+
+                <div class="perm-label">{t.others}</div>
+                <div class="perm-cell" class:granted={details.permissions[6] === 'r'}>{details.permissions[6]}</div>
+                <div class="perm-cell" class:granted={details.permissions[7] === 'w'}>{details.permissions[7]}</div>
+                <div class="perm-cell" class:granted={details.permissions[8] === 'x'}>{details.permissions[8]}</div>
+              </div>
+            {/if}
           </div>
 
           <div class="divider"></div>
@@ -638,5 +711,102 @@
 
   .spin {
     animation: spin 0.8s linear infinite;
+  }
+
+  .broken-link {
+    color: var(--red);
+    font-size: 11px;
+    font-weight: 600;
+    margin-left: 6px;
+  }
+
+  .error-state {
+    text-align: center;
+    padding: 30px;
+    color: var(--red);
+    font-size: 13px;
+  }
+
+  .edit-perm-btn {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--overlay1);
+    transition: background 0.1s, color 0.1s;
+    margin-left: 8px;
+  }
+
+  .edit-perm-btn:hover {
+    background: var(--surface0);
+    color: var(--text);
+  }
+
+  .perm-octal-input {
+    font-family: monospace;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--mauve);
+    background: rgba(54, 58, 79, 0.3);
+    border: 1px solid var(--border-medium);
+    border-radius: 6px;
+    padding: 4px 10px;
+    width: 80px;
+    text-align: center;
+  }
+
+  .perm-cell-edit {
+    text-align: center;
+    padding: 5px 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .perm-cell-edit input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--green);
+    cursor: pointer;
+  }
+
+  .perm-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 12px;
+  }
+
+  .btn-cancel {
+    padding: 6px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--subtext0);
+    background: var(--surface0);
+    font-weight: 600;
+  }
+
+  .btn-cancel:hover { background: var(--surface1); }
+
+  .btn-save {
+    padding: 6px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--base);
+    background: var(--green);
+    font-weight: 600;
+  }
+
+  .btn-save:hover { opacity: 0.88; }
+
+  .perm-error {
+    color: var(--red);
+    font-size: 12px;
+    margin-top: 6px;
+    padding: 6px 10px;
+    background: rgba(237, 135, 150, 0.08);
+    border-radius: 6px;
   }
 </style>

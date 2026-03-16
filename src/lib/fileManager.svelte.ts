@@ -88,6 +88,9 @@ class FileManager {
   sortDir = $state<"asc" | "desc">("asc");
   driveRefreshInterval: ReturnType<typeof setInterval> | null = null;
   private _watchInterval: ReturnType<typeof setInterval> | null = null;
+  private _watchUnlisten: (() => void) | null = null;
+  private _trashUnlisten: (() => void) | null = null;
+  private _splitUnlisten: (() => void) | null = null;
   elevated = $state(false);
   undoStack = $state<UndoOp[]>([]);
   redoStack = $state<UndoOp[]>([]);
@@ -436,6 +439,7 @@ class FileManager {
       await this.initPicker();
       this.startDriveRefresh();
       this.refreshTrashSize();
+      this.startTrashWatch();
       this.checkDefaultFileManager();
       this.checkPortalInstalled();
       this.loadThemeList();
@@ -450,26 +454,70 @@ class FileManager {
     return invoke<FileEntry[]>(cmd, { path, showHidden });
   }
 
-  startWatch(path: string) {
+  private _dirSignature(arr: FileEntry[]): string {
+    // Lightweight signature for huge dirs: count + first/last entry info
+    if (arr.length > 10000) {
+      const first = arr[0];
+      const last = arr[arr.length - 1];
+      return `${arr.length}|${first?.modified ?? 0}|${first?.path ?? ""}|${last?.modified ?? 0}|${last?.path ?? ""}`;
+    }
+    return arr.map(e => e.path + e.size + (e.modified ?? 0) + (e.permissionsMode ?? 0)).sort().join("|");
+  }
+
+  async startWatch(path: string) {
     this.stopWatch();
-    this._watchInterval = setInterval(async () => {
-      if (this.isLoading || this.deleteProgress) return;
-      try {
-        const fresh = await this.listDir(path, this.showHidden);
-        const sig = (arr: FileEntry[]) => arr.map(e => e.path + (e.modified ?? 0)).sort().join("|");
-        if (sig(fresh) !== sig(this.entries)) {
-          this.entries = fresh;
-        }
-      } catch (_) {}
-    }, WATCH_INTERVAL_MS);
+    try {
+      await invoke("cmd_watch_directory", { path });
+      const unlisten = await listen("fs-changed", async () => {
+        if (this.isLoading || this.deleteProgress) return;
+        try {
+          const fresh = await this.listDir(path, this.showHidden);
+          if (this._dirSignature(fresh) !== this._dirSignature(this.entries)) {
+            this.entries = fresh;
+          }
+        } catch (_) {}
+      });
+      this._watchUnlisten = unlisten;
+    } catch (_) {
+      // Fallback to polling if notify fails
+      this._watchInterval = setInterval(async () => {
+        if (this.isLoading || this.deleteProgress) return;
+        try {
+          const fresh = await this.listDir(path, this.showHidden);
+          if (this._dirSignature(fresh) !== this._dirSignature(this.entries)) {
+            this.entries = fresh;
+          }
+        } catch (_) {}
+      }, WATCH_INTERVAL_MS);
+    }
   }
 
   stopWatch() {
+    if (this._watchUnlisten) { this._watchUnlisten(); this._watchUnlisten = null; }
     if (this._watchInterval) { clearInterval(this._watchInterval); this._watchInterval = null; }
+    invoke("cmd_unwatch_directory", {}).catch(() => {});
+  }
+
+  async startTrashWatch() {
+    try {
+      const trashPath = await invoke<string>("get_home_dir") + "/.local/share/Trash/files";
+      await invoke("cmd_watch_directory", { path: trashPath, channel: "trash-changed" });
+      const unlisten = await listen("trash-changed", () => {
+        this.refreshTrashSize();
+      });
+      this._trashUnlisten = unlisten;
+    } catch (_) {}
+  }
+
+  stopTrashWatch() {
+    if (this._trashUnlisten) { this._trashUnlisten(); this._trashUnlisten = null; }
+    invoke("cmd_unwatch_directory", { channel: "trash-changed" }).catch(() => {});
   }
 
   destroy() {
     this.stopWatch();
+    this.stopTrashWatch();
+    if (this._splitUnlisten) { this._splitUnlisten(); this._splitUnlisten = null; }
     if (this.driveRefreshInterval) { clearInterval(this.driveRefreshInterval); this.driveRefreshInterval = null; }
     if (this._searchDebounce) { clearTimeout(this._searchDebounce); this._searchDebounce = null; }
     if (this._statusTimer) { clearTimeout(this._statusTimer); this._statusTimer = null; }
@@ -501,10 +549,13 @@ class FileManager {
       this.history = newHistory;
       this.historyPos = newHistory.length - 1;
       this.currentPath = path;
+      if (entries.length > 50000) {
+        this.error = `Warning: ${entries.length.toLocaleString()} items — performance may be degraded`;
+      }
       this.entries = entries;
       this.selected = new Set();
       this.renameTarget = null;
-      this.error = null;
+      if (entries.length <= 50000) this.error = null;
       this.globalSearchResults = [];
       this.searchQuery = "";
       this.folderSizes.clear();

@@ -7,6 +7,8 @@ export interface FileEntry {
   isHidden: boolean;
   extension: string | null;
   isWritable: boolean;
+  permissionsMode: number | null;
+  isBrokenLink: boolean;
 }
 
 export interface BookmarkEntry {
@@ -37,11 +39,13 @@ export interface FileDetails {
   extension: string | null;
   mimeType: string;
   permissions: string;
+  permissionsMode: number;
   owner: string;
   group: string;
   isReadonly: boolean;
   isExecutable: boolean;
   linkTarget: string | null;
+  linkTargetExists: boolean | null;
   childrenCount: number | null;
   dirSize: number | null;
 }

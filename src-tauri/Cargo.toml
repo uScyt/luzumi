@@ -29,3 +29,5 @@ drag = "2"
 glib = "0.18"
 md5 = "0.7"
 sha2 = "0.10"
+notify = { version = "7", default-features = false, features = ["macos_fsevent"] }
+percent-encoding = "2"

@@ -5,6 +5,7 @@
   import { t } from "../i18n";
   import { renderIcon } from "../icons";
   import FileTooltip from "./FileTooltip.svelte";
+  import VirtualScroller from "./VirtualScroller.svelte";
 
   // Rubber band selection
   let containerEl: HTMLElement;
@@ -181,110 +182,115 @@
     </button>
   </div>
 
-  <div class="list-body">
-    {#if displayed.length === 0}
+  {#if displayed.length === 0}
+    <div class="list-body">
       <div class="empty-state">
         <svg width="40" height="40" viewBox="0 0 16 16" fill="none" opacity=".25">
           <path d="M2 5C2 4.45 2.45 4 3 4H7L9 6H13C13.55 6 14 6.45 14 7V12C14 12.55 13.55 13 13 13H3C2.45 13 2 12.55 2 12V5Z" stroke="currentColor" stroke-width="1" fill="currentColor" opacity=".2"/>
         </svg>
         <span>{fm.searchQuery ? t.noResults : t.emptyDirectory}</span>
       </div>
-    {:else}
-      {#each displayed as entry (entry.path)}
-        {@const iconName = getFileIcon(entry)}
-        {@const iconColor = getFileColor(entry)}
-        {@const isSelected = fm.selected.has(entry.path)}
-        {@const isRenaming = fm.renameTarget === entry.path}
-        <div
-          class="file-row"
-          class:selected={isSelected}
-          class:cut={fm.clipboard?.mode === "cut" && fm.clipboard.paths.includes(entry.path)}
-          class:drop-target={fm.dropTarget === entry.path}
-          class:dragging={fm.dragPaths.includes(entry.path)}
-          role="row"
-          tabindex="0"
-          data-path={entry.path}
-          draggable={!isRenaming ? "true" : undefined}
-          onclick={(e) => onRowClick(e, entry)}
-          ondblclick={() => onRowDblClick(entry)}
-          oncontextmenu={(e) => onContextMenu(e, entry)}
-          onkeydown={(e) => onRowKeyDown(e, entry)}
-          ondragstart={(e) => { if (e.dataTransfer) { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", entry.path); } fm.setDragPaths(entry); fm.startNativeDrag(entry); }}
-          ondragend={() => { fm.dragPaths = []; fm.dropTarget = null; }}
-          ondragenter={(e) => onRowDragEnter(e, entry)}
-          ondragover={(e) => { if (entry.kind === "directory" && !fm.dragPaths.includes(entry.path)) { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; fm.dropTarget = entry.path; } }}
-          ondragleave={() => { if (fm.dropTarget === entry.path) fm.dropTarget = null; }}
-          ondrop={(e) => { if (entry.kind === "directory") { e.preventDefault(); e.stopPropagation(); fm.requestDrop(entry.path); } }}
-          onmouseenter={(e) => onRowMouseEnter(e, entry)}
-          onmouseleave={onRowMouseLeave}
-          onmousemove={onRowMouseMove}
-        >
-          <div class="col-icon">
-            <div class="icon-wrap">
-              <svg width={listIconSize} height={listIconSize} viewBox="0 0 16 16" style="color: {iconColor}">
-                {@html renderIcon(iconName)}
-              </svg>
-              {#if !entry.isWritable}
-                <div class="lock-badge" title={t.noWritePermission}>
-                  <svg width="7" height="7" viewBox="0 0 16 16" fill="none">
-                    <rect x="3" y="7" width="10" height="8" rx="2" fill="var(--crust)" stroke="var(--peach)" stroke-width="2"/>
-                    <path d="M6 7V5C6 3.34 6.9 2 8 2s2 1.34 2 3v2" stroke="var(--peach)" stroke-width="2" stroke-linecap="round" fill="none"/>
-                  </svg>
-                </div>
+    </div>
+  {:else}
+    <VirtualScroller items={displayed} itemHeight={listRowHeight} class="list-body" style="padding: 4px 8px">
+      {#snippet children(visibleItems, _startIndex)}
+        {#each visibleItems as entry (entry.path)}
+          {@const iconName = getFileIcon(entry)}
+          {@const iconColor = getFileColor(entry)}
+          {@const isSelected = fm.selected.has(entry.path)}
+          {@const isRenaming = fm.renameTarget === entry.path}
+          <div
+            class="file-row"
+            class:selected={isSelected}
+            class:cut={fm.clipboard?.mode === "cut" && fm.clipboard.paths.includes(entry.path)}
+            class:drop-target={fm.dropTarget === entry.path}
+            class:dragging={fm.dragPaths.includes(entry.path)}
+            role="row"
+            tabindex="0"
+            data-path={entry.path}
+            draggable={!isRenaming ? "true" : undefined}
+            onclick={(e) => onRowClick(e, entry)}
+            ondblclick={() => onRowDblClick(entry)}
+            oncontextmenu={(e) => onContextMenu(e, entry)}
+            onkeydown={(e) => onRowKeyDown(e, entry)}
+            ondragstart={(e) => { if (e.dataTransfer) { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", entry.path); } fm.setDragPaths(entry); fm.startNativeDrag(entry); }}
+            ondragend={() => { fm.dragPaths = []; fm.dropTarget = null; }}
+            ondragenter={(e) => onRowDragEnter(e, entry)}
+            ondragover={(e) => { if (entry.kind === "directory" && !fm.dragPaths.includes(entry.path)) { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; fm.dropTarget = entry.path; } }}
+            ondragleave={() => { if (fm.dropTarget === entry.path) fm.dropTarget = null; }}
+            ondrop={(e) => { if (entry.kind === "directory") { e.preventDefault(); e.stopPropagation(); fm.requestDrop(entry.path); } }}
+            onmouseenter={(e) => onRowMouseEnter(e, entry)}
+            onmouseleave={onRowMouseLeave}
+            onmousemove={onRowMouseMove}
+          >
+            <div class="col-icon">
+              <div class="icon-wrap">
+                <svg width={listIconSize} height={listIconSize} viewBox="0 0 16 16" style="color: {iconColor}">
+                  {@html renderIcon(iconName)}
+                </svg>
+                {#if !entry.isWritable}
+                  <div class="lock-badge" title={t.noWritePermission}>
+                    <svg width="7" height="7" viewBox="0 0 16 16" fill="none">
+                      <rect x="3" y="7" width="10" height="8" rx="2" fill="var(--crust)" stroke="var(--peach)" stroke-width="2"/>
+                      <path d="M6 7V5C6 3.34 6.9 2 8 2s2 1.34 2 3v2" stroke="var(--peach)" stroke-width="2" stroke-linecap="round" fill="none"/>
+                    </svg>
+                  </div>
+                {/if}
+              </div>
+            </div>
+
+            <div class="col-name">
+              {#if isRenaming}
+                <input
+                  class="rename-input"
+                  bind:this={renameInput}
+                  bind:value={fm.renameBuffer}
+                  onclick={(e) => e.stopPropagation()}
+                  onkeydown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); commitRename(); }
+                    if (e.key === "Escape") { e.preventDefault(); fm.renameTarget = null; }
+                  }}
+                  onblur={commitRename}
+                />
+              {:else}
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <span
+                  class="file-name"
+                  class:directory={entry.kind === "directory"}
+                  class:symlink={entry.kind === "symlink"}
+                  class:broken-link={entry.isBrokenLink}
+                  ondblclick={(e) => { e.stopPropagation(); startRename(entry); }}
+                  title={entry.isBrokenLink ? `${entry.name} (broken link)` : entry.name}
+                >{entry.name}</span>
+                {@const gitSt = fm.getGitFileStatus(entry.path)}
+                {#if gitSt}
+                  <span class="git-dot git-{gitSt}" title={gitSt}></span>
+                {/if}
               {/if}
             </div>
-          </div>
 
-          <div class="col-name">
-            {#if isRenaming}
-              <input
-                class="rename-input"
-                bind:this={renameInput}
-                bind:value={fm.renameBuffer}
-                onclick={(e) => e.stopPropagation()}
-                onkeydown={(e) => {
-                  if (e.key === "Enter") { e.preventDefault(); commitRename(); }
-                  if (e.key === "Escape") { e.preventDefault(); fm.renameTarget = null; }
-                }}
-                onblur={commitRename}
-              />
-            {:else}
-              <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <span
-                class="file-name"
-                class:directory={entry.kind === "directory"}
-                class:symlink={entry.kind === "symlink"}
-                ondblclick={(e) => { e.stopPropagation(); startRename(entry); }}
-                title={entry.name}
-              >{entry.name}</span>
-              {@const gitSt = fm.getGitFileStatus(entry.path)}
-              {#if gitSt}
-                <span class="git-dot git-{gitSt}" title={gitSt}></span>
-              {/if}
-            {/if}
-          </div>
-
-          <div class="col-size">
-            {#if entry.kind === "directory" && fm.folderSizes.has(entry.path)}
-              {@const s = fm.folderSizes.get(entry.path)!}
-              {#if s === -1}
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" class="spin-icon"><path d="M8 2A6 6 0 1 0 14 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            <div class="col-size">
+              {#if entry.kind === "directory" && fm.folderSizes.has(entry.path)}
+                {@const s = fm.folderSizes.get(entry.path)!}
+                {#if s === -1}
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" class="spin-icon"><path d="M8 2A6 6 0 1 0 14 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                {:else}
+                  {formatSize(s)}
+                {/if}
+              {:else if entry.kind === "directory"}
+                <button class="calc-size" onclick={(e) => { e.stopPropagation(); fm.calculateFolderSize(entry.path); }} title={t.calculateSize}>&mdash;</button>
               {:else}
-                {formatSize(s)}
+                {entry.size != null ? formatSize(entry.size) : "\u2014"}
               {/if}
-            {:else if entry.kind === "directory"}
-              <button class="calc-size" onclick={(e) => { e.stopPropagation(); fm.calculateFolderSize(entry.path); }} title={t.calculateSize}>&mdash;</button>
-            {:else}
-              {entry.size != null ? formatSize(entry.size) : "\u2014"}
-            {/if}
+            </div>
+            <div class="col-date">
+              {formatDate(entry.modified)}
+            </div>
           </div>
-          <div class="col-date">
-            {formatDate(entry.modified)}
-          </div>
-        </div>
-      {/each}
-    {/if}
-  </div>
+        {/each}
+      {/snippet}
+    </VirtualScroller>
+  {/if}
 </div>
 
 {#if rubberBox}
@@ -361,7 +367,7 @@
     font-weight: 700;
   }
 
-  .list-body {
+  .list-body, :global(.list-body) {
     flex: 1;
     overflow-y: auto;
     padding: 4px 8px;
@@ -467,6 +473,12 @@
   .file-name.symlink {
     color: var(--teal);
     font-style: italic;
+  }
+
+  .file-name.broken-link {
+    color: var(--red);
+    opacity: 0.7;
+    text-decoration: line-through;
   }
 
   .col-size, .col-date {

@@ -6,6 +6,7 @@
   import { t } from "../i18n";
   import { renderIcon } from "../icons";
   import FileTooltip from "./FileTooltip.svelte";
+  import VirtualScroller from "./VirtualScroller.svelte";
 
   const IMAGE_EXTS = new Set(["png","jpg","jpeg","gif","webp","bmp","svg","ico","tiff","tif","heic","heif","avif","jxl"]);
 
@@ -189,6 +190,15 @@
 
   const displayed = $derived(fm.filteredEntries());
 
+  // Virtual scrolling: compute grid columns from container width
+  let gridContainerWidth = $state(0);
+  const cardMinWidth = $derived(fm.gridIconSize + 40);
+  // card padding (14+10=24 vertical) + icon + gap(7) + name (~32) => approximate row height
+  const cardRowHeight = $derived(fm.gridIconSize + 24 + 7 + 32 + 4); // +4 for gap
+  const gridColumns = $derived(Math.max(1, Math.floor((gridContainerWidth - 32) / (cardMinWidth + 4)) || 1)); // 32=padding, 4=gap
+
+  let scrollerEl: VirtualScroller;
+
   $effect(() => {
     pendingThumbs = [];
     for (const entry of displayed) {
@@ -202,6 +212,17 @@
     if (fm.pendingSelect && displayed.length > 0) {
       fm.consumePendingSelect(containerEl);
     }
+  });
+
+  $effect(() => {
+    if (!containerEl) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        gridContainerWidth = entry.contentRect.width;
+      }
+    });
+    ro.observe(containerEl);
+    return () => ro.disconnect();
   });
 </script>
 
@@ -241,105 +262,110 @@
       <span>{fm.searchQuery ? t.noResults : t.emptyDirectory}</span>
     </div>
   {:else}
-    <div class="grid">
-      {#each displayed as entry (entry.path)}
-        {@const iconName = getFileIcon(entry)}
-        {@const iconColor = getFileColor(entry)}
-        {@const isSelected = fm.selected.has(entry.path)}
-        {@const isRenaming = fm.renameTarget === entry.path}
-        {@const thumb = thumbnails.get(entry.path)}
-        {@const showThumb = isImage(entry) && thumb}
-        <div
-          class="grid-card glass-card"
-          class:selected={isSelected}
-          class:cut={fm.clipboard?.mode === "cut" && fm.clipboard.paths.includes(entry.path)}
-          class:drop-target={fm.dropTarget === entry.path}
-          class:dragging={fm.dragPaths.includes(entry.path)}
-          role="gridcell"
-          tabindex="0"
-          data-path={entry.path}
-          draggable={!isRenaming ? "true" : undefined}
-          onclick={(e) => onCardClick(e, entry)}
-          ondblclick={() => { if (!isRenaming) fm.open(entry); }}
-          oncontextmenu={(e) => onContextMenu(e, entry)}
-          onkeydown={(e) => {
-            if (e.key === "Enter") { fm.open(entry); return; }
-            if (e.key === "F2") { startRename(entry); return; }
-            if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
-              e.preventDefault();
-              const entries = fm.filteredEntries();
-              const idx = entries.findIndex(x => x.path === entry.path);
-              let next: typeof entry | undefined;
-              if (e.key === "ArrowRight" || e.key === "ArrowDown") next = entries[idx + 1];
-              else next = entries[idx - 1];
-              if (!next) return;
-              fm.toggleSelect(next.path, e.ctrlKey || e.metaKey, e.shiftKey);
-              requestAnimationFrame(() => {
-                containerEl?.querySelector<HTMLElement>(`[data-path="${CSS.escape(next!.path)}"]`)?.focus();
-              });
-            }
-          }}
-          ondragstart={(e) => onDragStart(e, entry)}
-          ondragend={() => { fm.dragPaths = []; fm.dropTarget = null; }}
-          ondragenter={(e) => onCardDragEnter(e, entry)}
-          ondragover={(e) => onCardDragOver(e, entry)}
-          ondragleave={() => { if (fm.dropTarget === entry.path) fm.dropTarget = null; }}
-          ondrop={(e) => onCardDrop(e, entry)}
-          onmouseenter={(e) => onCardMouseEnter(e, entry)}
-          onmouseleave={onCardMouseLeave}
-          onmousemove={onCardMouseMove}
-        >
-          <div class="card-icon" class:folder={entry.kind === "directory"} class:has-thumb={showThumb}>
-            {#if showThumb}
-              <img
-                src={thumb}
-                alt=""
-                class="thumb"
-                style="width: {fm.gridIconSize}px; height: {fm.gridIconSize}px"
-                onerror={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-              />
-            {:else}
-              <svg width={fm.gridIconSize} height={fm.gridIconSize} viewBox="0 0 16 16" style="color: {iconColor}">
-                {@html renderIcon(iconName)}
-              </svg>
-            {/if}
-            {#if !entry.isWritable}
-              <div class="lock-badge" title={t.noWritePermission}>
-                <svg width="8" height="8" viewBox="0 0 16 16" fill="none">
-                  <rect x="3" y="7" width="10" height="8" rx="2" fill="var(--crust)" stroke="var(--peach)" stroke-width="2"/>
-                  <path d="M6 7V5C6 3.34 6.9 2 8 2s2 1.34 2 3v2" stroke="var(--peach)" stroke-width="2" stroke-linecap="round" fill="none"/>
-                </svg>
-              </div>
-            {/if}
-          </div>
-          {#if isRenaming}
-            <input
-              class="rename-input"
-              bind:this={renameInput}
-              bind:value={fm.renameBuffer}
-              onclick={(e) => e.stopPropagation()}
-              ondblclick={(e) => e.stopPropagation()}
+    <VirtualScroller items={displayed} itemHeight={cardRowHeight} columns={gridColumns} class="grid-scroll-area">
+      {#snippet children(visibleItems, _startIndex)}
+        <div class="grid" style="grid-template-columns: repeat({gridColumns}, 1fr)">
+          {#each visibleItems as entry (entry.path)}
+            {@const iconName = getFileIcon(entry)}
+            {@const iconColor = getFileColor(entry)}
+            {@const isSelected = fm.selected.has(entry.path)}
+            {@const isRenaming = fm.renameTarget === entry.path}
+            {@const thumb = thumbnails.get(entry.path)}
+            {@const showThumb = isImage(entry) && thumb}
+            <div
+              class="grid-card glass-card"
+              class:selected={isSelected}
+              class:cut={fm.clipboard?.mode === "cut" && fm.clipboard.paths.includes(entry.path)}
+              class:drop-target={fm.dropTarget === entry.path}
+              class:dragging={fm.dragPaths.includes(entry.path)}
+              role="gridcell"
+              tabindex="0"
+              data-path={entry.path}
+              draggable={!isRenaming ? "true" : undefined}
+              onclick={(e) => onCardClick(e, entry)}
+              ondblclick={() => { if (!isRenaming) fm.open(entry); }}
+              oncontextmenu={(e) => onContextMenu(e, entry)}
               onkeydown={(e) => {
-                if (e.key === "Enter") { e.preventDefault(); commitRename(); }
-                if (e.key === "Escape") { e.preventDefault(); fm.renameTarget = null; }
+                if (e.key === "Enter") { fm.open(entry); return; }
+                if (e.key === "F2") { startRename(entry); return; }
+                if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
+                  e.preventDefault();
+                  const entries = fm.filteredEntries();
+                  const idx = entries.findIndex(x => x.path === entry.path);
+                  let next: typeof entry | undefined;
+                  if (e.key === "ArrowRight" || e.key === "ArrowDown") next = entries[idx + 1];
+                  else next = entries[idx - 1];
+                  if (!next) return;
+                  fm.toggleSelect(next.path, e.ctrlKey || e.metaKey, e.shiftKey);
+                  requestAnimationFrame(() => {
+                    containerEl?.querySelector<HTMLElement>(`[data-path="${CSS.escape(next!.path)}"]`)?.focus();
+                  });
+                }
               }}
-              onblur={commitRename}
-            />
-          {:else}
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <span
-              class="card-name"
-              title={entry.name}
-              ondblclick={(e) => { e.stopPropagation(); startRename(entry); }}
-            >{entry.name}</span>
-            {@const gitSt = fm.getGitFileStatus(entry.path)}
-            {#if gitSt}
-              <span class="git-dot git-{gitSt}"></span>
-            {/if}
-          {/if}
+              ondragstart={(e) => onDragStart(e, entry)}
+              ondragend={() => { fm.dragPaths = []; fm.dropTarget = null; }}
+              ondragenter={(e) => onCardDragEnter(e, entry)}
+              ondragover={(e) => onCardDragOver(e, entry)}
+              ondragleave={() => { if (fm.dropTarget === entry.path) fm.dropTarget = null; }}
+              ondrop={(e) => onCardDrop(e, entry)}
+              onmouseenter={(e) => onCardMouseEnter(e, entry)}
+              onmouseleave={onCardMouseLeave}
+              onmousemove={onCardMouseMove}
+            >
+              <div class="card-icon" class:folder={entry.kind === "directory"} class:has-thumb={showThumb}>
+                {#if showThumb}
+                  <img
+                    src={thumb}
+                    alt=""
+                    class="thumb"
+                    style="width: {fm.gridIconSize}px; height: {fm.gridIconSize}px"
+                    onerror={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                {:else}
+                  <svg width={fm.gridIconSize} height={fm.gridIconSize} viewBox="0 0 16 16" style="color: {iconColor}">
+                    {@html renderIcon(iconName)}
+                  </svg>
+                {/if}
+                {#if !entry.isWritable}
+                  <div class="lock-badge" title={t.noWritePermission}>
+                    <svg width="8" height="8" viewBox="0 0 16 16" fill="none">
+                      <rect x="3" y="7" width="10" height="8" rx="2" fill="var(--crust)" stroke="var(--peach)" stroke-width="2"/>
+                      <path d="M6 7V5C6 3.34 6.9 2 8 2s2 1.34 2 3v2" stroke="var(--peach)" stroke-width="2" stroke-linecap="round" fill="none"/>
+                    </svg>
+                  </div>
+                {/if}
+              </div>
+              {#if isRenaming}
+                <input
+                  class="rename-input"
+                  bind:this={renameInput}
+                  bind:value={fm.renameBuffer}
+                  onclick={(e) => e.stopPropagation()}
+                  ondblclick={(e) => e.stopPropagation()}
+                  onkeydown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); commitRename(); }
+                    if (e.key === "Escape") { e.preventDefault(); fm.renameTarget = null; }
+                  }}
+                  onblur={commitRename}
+                />
+              {:else}
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <span
+                  class="card-name"
+                  class:broken-link={entry.isBrokenLink}
+                  title={entry.isBrokenLink ? `${entry.name} (broken link)` : entry.name}
+                  ondblclick={(e) => { e.stopPropagation(); startRename(entry); }}
+                >{entry.name}</span>
+                {@const gitSt = fm.getGitFileStatus(entry.path)}
+                {#if gitSt}
+                  <span class="git-dot git-{gitSt}"></span>
+                {/if}
+              {/if}
+            </div>
+          {/each}
         </div>
-      {/each}
-    </div>
+      {/snippet}
+    </VirtualScroller>
   {/if}
 </div>
 
@@ -402,14 +428,20 @@
 
   .grid-container {
     flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+  }
+
+  :global(.grid-scroll-area) {
+    flex: 1;
     overflow-y: auto;
     padding: 14px 16px;
-    user-select: none;
   }
 
   .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 104px), 1fr));
     gap: 4px;
   }
 
@@ -527,6 +559,12 @@
     -webkit-box-orient: vertical;
     line-height: 1.4;
     word-break: break-word;
+  }
+
+  .card-name.broken-link {
+    color: var(--red);
+    opacity: 0.7;
+    text-decoration: line-through;
   }
 
   .rename-input {

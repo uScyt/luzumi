@@ -115,6 +115,8 @@ pub struct FileEntry {
     pub is_hidden: bool,
     pub extension: Option<String>,
     pub is_writable: bool,
+    pub permissions_mode: Option<u32>,
+    pub is_broken_link: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,7 +163,8 @@ impl FileEntry {
         let name = path.file_name()?.to_string_lossy().to_string();
         let is_hidden = name.starts_with('.');
 
-        let kind = if meta.is_symlink() {
+        let is_symlink = meta.is_symlink();
+        let kind = if is_symlink {
             "symlink"
         } else if meta.is_dir() {
             "directory"
@@ -190,6 +193,16 @@ impl FileEntry {
 
         let is_writable = check_writable(path);
 
+        use std::os::unix::fs::PermissionsExt;
+        let permissions_mode = Some(meta.permissions().mode());
+
+        // Broken symlink: read_link succeeds but target doesn't exist
+        let is_broken_link = if is_symlink {
+            fs::metadata(path).is_err()
+        } else {
+            false
+        };
+
         Some(FileEntry {
             name,
             path: path.to_string_lossy().to_string(),
@@ -199,6 +212,8 @@ impl FileEntry {
             is_hidden,
             extension,
             is_writable,
+            permissions_mode,
+            is_broken_link,
         })
     }
 }
@@ -289,6 +304,8 @@ pub fn elevated_read_directory(path: &Path, show_hidden: bool) -> Result<Vec<Fil
                 is_hidden,
                 extension: extension.map(|s| s.to_string()),
                 is_writable: true, // elevated = root, always writable
+                permissions_mode: None,
+                is_broken_link: false,
             })
         })
         .collect();
@@ -564,16 +581,58 @@ pub fn get_drives() -> Vec<DriveInfo> {
         }
     }
 
+    // Detect root filesystem type dynamically from /proc/mounts
+    let root_fstype = fs::read_to_string("/proc/mounts").ok()
+        .and_then(|content| {
+            content.lines()
+                .find(|l| l.split_whitespace().nth(1) == Some("/"))
+                .and_then(|l| l.split_whitespace().nth(2).map(String::from))
+        })
+        .unwrap_or_else(|| "ext4".to_string());
+
+    let root_device = fs::read_to_string("/proc/mounts").ok()
+        .and_then(|content| {
+            content.lines()
+                .find(|l| l.split_whitespace().nth(1) == Some("/"))
+                .and_then(|l| l.split_whitespace().next().map(String::from))
+        })
+        .unwrap_or_else(|| "/dev/root".to_string());
+
     drives.push(DriveInfo {
         name: "Filesystem".to_string(),
         path: "/".to_string(),
-        device: "/dev/root".to_string(),
+        device: root_device,
         icon: "HardDrives".to_string(),
         is_mounted: true,
         is_encrypted: false,
         is_removable: false,
-        fstype: "ext4".to_string(),
+        fstype: root_fstype,
     });
+
+    // Detect GVFS mounts
+    let uid = unsafe { libc::getuid() };
+    let gvfs_dir = PathBuf::from(format!("/run/user/{}/gvfs", uid));
+    if gvfs_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&gvfs_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if path.is_dir() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    let display_name = name.split(':').next().unwrap_or(&name).replace('-', " ");
+                    drives.push(DriveInfo {
+                        name: display_name,
+                        path: path.to_string_lossy().to_string(),
+                        device: name,
+                        icon: "Globe".to_string(),
+                        is_mounted: true,
+                        is_encrypted: false,
+                        is_removable: false,
+                        fstype: "gvfs".to_string(),
+                    });
+                }
+            }
+        }
+    }
 
     drives
 }
@@ -717,11 +776,13 @@ pub struct FileDetails {
     pub extension: Option<String>,
     pub mime_type: String,
     pub permissions: String,
+    pub permissions_mode: u32,
     pub owner: String,
     pub group: String,
     pub is_readonly: bool,
     pub is_executable: bool,
     pub link_target: Option<String>,
+    pub link_target_exists: Option<bool>,
     pub children_count: Option<u64>,
     pub dir_size: Option<u64>,
 }
@@ -803,6 +864,12 @@ pub fn get_file_details(path: &Path) -> Result<FileDetails, String> {
         None
     };
 
+    let link_target_exists = if meta.is_symlink() {
+        Some(fs::metadata(path).is_ok())
+    } else {
+        None
+    };
+
     let (children_count, dir_size) = if path.is_dir() {
         let count = fs::read_dir(path).ok()
             .map(|rd| rd.count() as u64);
@@ -823,11 +890,13 @@ pub fn get_file_details(path: &Path) -> Result<FileDetails, String> {
         extension: extension.map(|e| e.to_string()),
         mime_type,
         permissions,
+        permissions_mode: mode,
         owner,
         group,
         is_readonly,
         is_executable,
         link_target,
+        link_target_exists,
         children_count,
         dir_size,
     })
@@ -940,25 +1009,51 @@ pub fn get_trash_path() -> PathBuf {
         .join("Trash")
 }
 
-pub fn list_trash() -> Result<Vec<FileEntry>, String> {
-    let trash_files = get_trash_path().join("files");
-    if !trash_files.exists() {
-        return Ok(Vec::new());
+fn get_all_trash_paths() -> Vec<PathBuf> {
+    let mut paths = vec![get_trash_path()];
+    let uid = unsafe { libc::getuid() };
+    if let Ok(mounts) = fs::read_to_string("/proc/mounts") {
+        for line in mounts.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 {
+                let mp = parts[1];
+                if mp.starts_with("/media") || mp.starts_with("/mnt") || mp.starts_with("/run/media") {
+                    let ext_trash = PathBuf::from(mp).join(format!(".Trash-{}", uid));
+                    if ext_trash.exists() {
+                        paths.push(ext_trash);
+                    }
+                }
+            }
+        }
     }
-    read_directory(&trash_files, true)
+    paths
 }
 
-pub fn get_trash_size() -> u64 {
-    let trash_files = get_trash_path().join("files");
-    if trash_files.exists() {
-        calculate_dir_size(&trash_files)
-    } else {
-        0
+pub fn list_all_trash() -> Result<Vec<FileEntry>, String> {
+    let mut all = Vec::new();
+    for trash_path in get_all_trash_paths() {
+        let files_dir = trash_path.join("files");
+        if files_dir.exists() {
+            if let Ok(entries) = read_directory(&files_dir, true) {
+                all.extend(entries);
+            }
+        }
     }
+    Ok(all)
 }
 
-pub fn empty_trash() -> Result<(), String> {
-    let trash_path = get_trash_path();
+pub fn get_all_trash_size() -> u64 {
+    let mut total = 0;
+    for trash_path in get_all_trash_paths() {
+        let files_dir = trash_path.join("files");
+        if files_dir.exists() {
+            total += calculate_dir_size(&files_dir);
+        }
+    }
+    total
+}
+
+fn empty_single_trash(trash_path: &Path) -> Result<(), String> {
     let files_dir = trash_path.join("files");
     let info_dir = trash_path.join("info");
 
@@ -988,6 +1083,41 @@ pub fn empty_trash() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+pub fn empty_all_trash() -> Result<(), String> {
+    for trash_path in get_all_trash_paths() {
+        empty_single_trash(&trash_path)?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrashItemInfo {
+    pub original_path: Option<String>,
+    pub deletion_date: Option<String>,
+}
+
+pub fn get_trash_item_info(file_name: &str) -> TrashItemInfo {
+    for trash_path in get_all_trash_paths() {
+        let info_path = trash_path.join("info").join(format!("{}.trashinfo", file_name));
+        if info_path.exists() {
+            if let Ok(content) = fs::read_to_string(&info_path) {
+                let mut original_path = None;
+                let mut deletion_date = None;
+                for line in content.lines() {
+                    if let Some(p) = line.strip_prefix("Path=") {
+                        original_path = Some(trash_url_decode(p));
+                    } else if let Some(d) = line.strip_prefix("DeletionDate=") {
+                        deletion_date = Some(d.to_string());
+                    }
+                }
+                return TrashItemInfo { original_path, deletion_date };
+            }
+        }
+    }
+    TrashItemInfo { original_path: None, deletion_date: None }
 }
 
 pub fn restore_from_trash(file_name: &str) -> Result<(), String> {
@@ -1021,7 +1151,7 @@ pub fn restore_from_trash(file_name: &str) -> Result<(), String> {
                     .find(|l| l.starts_with("Path="))
                     .map(|l| {
                         let raw = l.trim_start_matches("Path=");
-                        urlish_decode(raw)
+                        trash_url_decode(raw)
                     })
             })
     } else {
@@ -1057,23 +1187,28 @@ pub fn restore_from_trash(file_name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn urlish_decode(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '%' {
-            let hex: String = chars.by_ref().take(2).collect();
-            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                result.push(byte as char);
-            } else {
-                result.push('%');
-                result.push_str(&hex);
-            }
-        } else {
-            result.push(c);
-        }
-    }
-    result
+fn trash_url_decode(s: &str) -> String {
+    use percent_encoding::percent_decode_str;
+    percent_decode_str(s).decode_utf8_lossy().to_string()
+}
+
+// ── Permissions modification ──
+
+pub fn set_permissions(path: &Path, mode: u32) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let perms = fs::Permissions::from_mode(mode);
+    fs::set_permissions(path, perms).map_err(|e| e.to_string())
+}
+
+pub fn elevated_set_permissions(path: &Path, mode: u32) -> Result<(), String> {
+    let cmd = format!("chmod {:o} {}", mode, shell_escape(&path.to_string_lossy())?);
+    run_root_cmd(&cmd).map(|_| ())
+}
+
+// ── Symlink creation ──
+
+pub fn create_symlink(target: &Path, link_path: &Path) -> Result<(), String> {
+    std::os::unix::fs::symlink(target, link_path).map_err(|e| e.to_string())
 }
 
 // ── Quick Access ──

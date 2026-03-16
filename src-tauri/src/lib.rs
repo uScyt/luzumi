@@ -7,19 +7,21 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 use tauri::menu::{MenuBuilder, MenuItem};
+use notify::{Watcher, RecursiveMode};
 use filesystem::{
-    BookmarkEntry, DriveInfo, FileEntry, FileDetails, DuplicateGroup,
+    BookmarkEntry, DriveInfo, FileEntry, FileDetails, DuplicateGroup, TrashItemInfo,
     read_directory, elevated_read_directory, create_directory, rename_entry,
     delete_entries, copy_entry, move_entry,
     get_bookmarks, get_drives, mount_drive, unlock_drive, eject_drive,
     read_thumbnail, get_file_details,
     elevated_move, elevated_copy, elevated_delete, elevated_rename, elevated_create_directory,
     authenticate_admin, kill_root_shell, check_path_readable,
-    list_trash, get_trash_size, empty_trash, restore_from_trash,
+    list_all_trash, get_all_trash_size, empty_all_trash, restore_from_trash,
     get_quick_access, add_quick_access, remove_quick_access,
     count_secure_targets, secure_delete_streamed,
     calculate_dir_size, find_duplicates,
     copy_dir_all,
+    set_permissions, create_symlink, get_trash_item_info,
 };
 
 #[derive(Clone, serde::Serialize)]
@@ -99,6 +101,8 @@ fn cmd_search_index(query: String, limit: Option<usize>) -> Result<Vec<FileEntry
             is_hidden: name.starts_with('.'),
             extension,
             is_writable: true,
+            permissions_mode: None,
+            is_broken_link: false,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -320,17 +324,17 @@ fn cmd_elevated_create_directory(parent: String, name: String) -> Result<(), Str
 
 #[tauri::command]
 fn cmd_list_trash() -> Result<Vec<FileEntry>, String> {
-    list_trash()
+    list_all_trash()
 }
 
 #[tauri::command]
 fn cmd_get_trash_size() -> u64 {
-    get_trash_size()
+    get_all_trash_size()
 }
 
 #[tauri::command]
 fn cmd_empty_trash() -> Result<(), String> {
-    empty_trash()
+    empty_all_trash()
 }
 
 #[tauri::command]
@@ -1099,6 +1103,97 @@ async fn cmd_start_drag(window: tauri::Window, paths: Vec<String>) -> Result<(),
     Ok(())
 }
 
+// ── File watcher ──
+
+struct WatcherState {
+    main: Option<notify::RecommendedWatcher>,
+    split: Option<notify::RecommendedWatcher>,
+    trash: Option<notify::RecommendedWatcher>,
+}
+
+#[tauri::command]
+fn cmd_watch_directory(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Mutex<WatcherState>>,
+    path: String,
+    channel: Option<String>,
+) -> Result<(), String> {
+    let mut guard = state.lock().map_err(|e| e.to_string())?;
+    let event_name = channel.unwrap_or_else(|| "fs-changed".to_string());
+    let app2 = app.clone();
+    let path_clone = path.clone();
+    let event_name_clone = event_name.clone();
+
+    let watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+        if let Ok(_event) = res {
+            let _ = app2.emit(&event_name_clone, &path_clone);
+        }
+    }).map_err(|e| e.to_string())?;
+
+    match event_name.as_str() {
+        "fs-changed-split" => {
+            guard.split = Some(watcher);
+            if let Some(ref mut w) = guard.split {
+                w.watch(Path::new(&path), RecursiveMode::NonRecursive).map_err(|e| e.to_string())?;
+            }
+        }
+        "trash-changed" => {
+            guard.trash = Some(watcher);
+            if let Some(ref mut w) = guard.trash {
+                w.watch(Path::new(&path), RecursiveMode::NonRecursive).map_err(|e| e.to_string())?;
+            }
+        }
+        _ => {
+            guard.main = Some(watcher);
+            if let Some(ref mut w) = guard.main {
+                w.watch(Path::new(&path), RecursiveMode::NonRecursive).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn cmd_unwatch_directory(
+    state: tauri::State<'_, Mutex<WatcherState>>,
+    channel: Option<String>,
+) -> Result<(), String> {
+    let mut guard = state.lock().map_err(|e| e.to_string())?;
+    match channel.as_deref() {
+        Some("fs-changed-split") => { guard.split = None; }
+        Some("trash-changed") => { guard.trash = None; }
+        _ => { guard.main = None; }
+    }
+    Ok(())
+}
+
+// ── Permissions ──
+
+#[tauri::command]
+fn cmd_set_permissions(path: String, mode: u32) -> Result<(), String> {
+    set_permissions(Path::new(&path), mode)
+}
+
+#[tauri::command]
+fn cmd_elevated_set_permissions(path: String, mode: u32) -> Result<(), String> {
+    use filesystem::elevated_set_permissions;
+    elevated_set_permissions(Path::new(&path), mode)
+}
+
+// ── Symlink creation ──
+
+#[tauri::command]
+fn cmd_create_symlink(target: String, link_path: String) -> Result<(), String> {
+    create_symlink(Path::new(&target), Path::new(&link_path))
+}
+
+// ── Trash item info ──
+
+#[tauri::command]
+fn cmd_get_trash_item_info(file_name: String) -> TrashItemInfo {
+    get_trash_item_info(&file_name)
+}
+
 #[derive(Clone, serde::Deserialize)]
 struct NativeMenuItem {
     id: String,
@@ -1135,6 +1230,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(Mutex::new(picker_config))
+        .manage(Mutex::new(WatcherState { main: None, split: None, trash: None }))
         .on_menu_event(|app, event| {
             let _ = app.emit("context-menu-action", event.id().0.clone());
         })
@@ -1200,6 +1296,12 @@ pub fn run() {
             cmd_get_disk_space,
             cmd_get_git_status,
             cmd_show_context_menu,
+            cmd_watch_directory,
+            cmd_unwatch_directory,
+            cmd_set_permissions,
+            cmd_elevated_set_permissions,
+            cmd_create_symlink,
+            cmd_get_trash_item_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

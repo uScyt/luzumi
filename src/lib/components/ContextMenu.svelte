@@ -252,6 +252,21 @@
         {t.deletePermanently}
         <span class="hint">Shift+Del</span>
       </button>
+      {#if tgt2}
+        <button class="menu-item" onclick={() => action(async () => {
+          const name = tgt2!.name + ".link";
+          const parent = tgt2!.path.substring(0, tgt2!.path.lastIndexOf("/")) || "/";
+          const linkPath = parent + "/" + name;
+          try {
+            await invoke("cmd_create_symlink", { target: tgt2!.path, linkPath });
+            fm.setStatus(`Created symlink: ${name}`);
+            await fm.reload();
+          } catch (e) { fm.error = String(e); }
+        })}>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6.5 10.5L9.5 7.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M9 11L9.5 11.5C10.88 12.88 13.12 12.88 14.5 11.5s1.38-3.62 0-5L13 5C11.62 3.62 9.38 3.62 8 5L7.5 5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/></svg>
+          Create Symlink
+        </button>
+      {/if}
       <div class="sep"></div>
       <button class="menu-item" onclick={() => { const entry = tgt2; close(); setTimeout(() => { fm.showProperties = entry; }, 0); }}>
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M8 7V11M8 5V5.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
