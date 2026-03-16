@@ -1194,6 +1194,16 @@ fn cmd_get_trash_item_info(file_name: String) -> TrashItemInfo {
     get_trash_item_info(&file_name)
 }
 
+#[tauri::command]
+fn cmd_get_all_trash_info(file_names: Vec<String>) -> std::collections::HashMap<String, TrashItemInfo> {
+    let mut result = std::collections::HashMap::new();
+    for name in file_names {
+        let info = get_trash_item_info(&name);
+        result.insert(name, info);
+    }
+    result
+}
+
 #[derive(Clone, serde::Deserialize)]
 struct NativeMenuItem {
     id: String,
@@ -1302,6 +1312,7 @@ pub fn run() {
             cmd_elevated_set_permissions,
             cmd_create_symlink,
             cmd_get_trash_item_info,
+            cmd_get_all_trash_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

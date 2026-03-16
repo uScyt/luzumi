@@ -10,19 +10,20 @@
   }
 
   let trashInfo = $state<Map<string, TrashItemInfo>>(new Map());
+  let loadedFor = "";
 
   $effect(() => {
     const entries = fm.trashEntries;
+    const key = entries.map(e => e.name).join("|");
+    if (key === loadedFor) return;
+    loadedFor = key;
     if (entries.length === 0) { trashInfo = new Map(); return; }
-    const newMap = new Map<string, TrashItemInfo>();
-    for (const entry of entries) {
-      invoke<TrashItemInfo>("cmd_get_trash_item_info", { fileName: entry.name })
-        .then((info) => {
-          newMap.set(entry.name, info);
-          trashInfo = new Map(newMap);
-        })
-        .catch(() => {});
-    }
+    const names = entries.map(e => e.name);
+    invoke<Record<string, TrashItemInfo>>("cmd_get_all_trash_info", { fileNames: names })
+      .then((result) => {
+        trashInfo = new Map(Object.entries(result));
+      })
+      .catch(() => {});
   });
 
   const svgPaths: Record<string, string> = {
@@ -125,7 +126,7 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    background: var(--surface0);
+    background: var(--content-bg, var(--base));
   }
 
   .trash-header {
@@ -133,12 +134,8 @@
     align-items: center;
     justify-content: space-between;
     padding: 10px 16px;
-    border-bottom: 1px solid rgba(237, 135, 150, 0.12);
-    background: linear-gradient(
-      to right,
-      rgba(237, 135, 150, 0.07) 0%,
-      rgba(24, 25, 38, 0.5) 70%
-    );
+    border-bottom: 1px solid var(--border-subtle);
+    background: rgba(24, 25, 38, 0.4);
     backdrop-filter: blur(12px);
     flex-shrink: 0;
     gap: 12px;
@@ -277,7 +274,7 @@
 
   .trash-name {
     font-size: 13px;
-    color: var(--subtext1);
+    color: var(--text);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -301,6 +298,9 @@
     flex-shrink: 0;
     opacity: 0;
     transition: background 0.1s, color 0.1s, opacity 0.15s;
+    background: none;
+    border: none;
+    cursor: pointer;
   }
 
   .trash-row:hover .restore-btn {
@@ -308,7 +308,7 @@
   }
 
   .restore-btn:hover {
-    background: var(--success-bg);
+    background: var(--hover-bg);
     color: var(--green);
   }
 
