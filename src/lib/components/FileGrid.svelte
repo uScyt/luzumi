@@ -14,15 +14,17 @@
     return entry.kind === "file" && !!entry.extension && IMAGE_EXTS.has(entry.extension.toLowerCase());
   }
 
+  // Thumbnail cache — non-reactive internals to avoid cascade re-renders
   let thumbnails = $state<Map<string, string>>(new Map());
-  let failedThumbs = $state<Set<string>>(new Set());
+  const requestedThumbs = new Set<string>();
   let pendingThumbs: FileEntry[] = [];
   let activeLoads = 0;
+  let thumbBatchTimer: ReturnType<typeof setTimeout> | null = null;
   const MAX_CONCURRENT_THUMBS = 6;
 
   function queueThumbnail(entry: FileEntry) {
-    if (thumbnails.has(entry.path) || failedThumbs.has(entry.path)) return;
-    failedThumbs.add(entry.path);
+    if (requestedThumbs.has(entry.path)) return;
+    requestedThumbs.add(entry.path);
     pendingThumbs.push(entry);
     drainThumbQueue();
   }
@@ -34,7 +36,13 @@
       invoke<string>("cmd_read_thumbnail", { path: entry.path })
         .then((data) => {
           thumbnails.set(entry.path, data);
-          thumbnails = new Map(thumbnails);
+          // Batch reactive updates: only trigger one re-render per frame
+          if (!thumbBatchTimer) {
+            thumbBatchTimer = setTimeout(() => {
+              thumbBatchTimer = null;
+              thumbnails = new Map(thumbnails);
+            }, 50);
+          }
         })
         .catch(() => {})
         .finally(() => {
@@ -199,9 +207,18 @@
 
   let scrollerEl: VirtualScroller;
 
+  // Only reload thumbnails when directory changes, not on every scroll/filter
+  let lastThumbPath = "";
   $effect(() => {
+    const path = fm.currentPath;
+    if (path === lastThumbPath) return;
+    lastThumbPath = path;
+    // Clear caches for new directory
+    requestedThumbs.clear();
     pendingThumbs = [];
-    for (const entry of displayed) {
+    thumbnails = new Map();
+    // Queue visible images
+    for (const entry of fm.entries) {
       if (isImage(entry) && (entry.size ?? 0) < 10 * 1024 * 1024) {
         queueThumbnail(entry);
       }
@@ -214,16 +231,9 @@
     }
   });
 
-  $effect(() => {
-    if (!containerEl) return;
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        gridContainerWidth = entry.contentRect.width;
-      }
-    });
-    ro.observe(containerEl);
-    return () => ro.disconnect();
-  });
+  function onScrollerResize(width: number, _height: number) {
+    gridContainerWidth = width;
+  }
 </script>
 
 <div class="grid-toolbar">
@@ -262,7 +272,7 @@
       <span>{fm.searchQuery ? t.noResults : t.emptyDirectory}</span>
     </div>
   {:else}
-    <VirtualScroller items={displayed} itemHeight={cardRowHeight} columns={gridColumns} class="grid-scroll-area">
+    <VirtualScroller items={displayed} itemHeight={cardRowHeight} columns={gridColumns} class="grid-scroll-area" onresize={onScrollerResize}>
       {#snippet children(visibleItems, _startIndex)}
         <div class="grid" style="grid-template-columns: repeat({gridColumns}, 1fr)">
           {#each visibleItems as entry (entry.path)}

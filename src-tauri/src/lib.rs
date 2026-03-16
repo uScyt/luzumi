@@ -1124,9 +1124,19 @@ fn cmd_watch_directory(
     let path_clone = path.clone();
     let event_name_clone = event_name.clone();
 
+    // Debounce: only emit if >300ms since last emit to avoid flooding
+    let last_emit = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
         if let Ok(_event) = res {
-            let _ = app2.emit(&event_name_clone, &path_clone);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            let prev = last_emit.load(std::sync::atomic::Ordering::Relaxed);
+            if now.saturating_sub(prev) >= 300 {
+                last_emit.store(now, std::sync::atomic::Ordering::Relaxed);
+                let _ = app2.emit(&event_name_clone, &path_clone);
+            }
         }
     }).map_err(|e| e.to_string())?;
 

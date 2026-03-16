@@ -9,6 +9,7 @@
     children,
     class: className = "",
     style: extraStyle = "",
+    onresize,
   }: {
     items: any[];
     itemHeight: number;
@@ -17,6 +18,7 @@
     children: Snippet<[any[], number]>;
     class?: string;
     style?: string;
+    onresize?: (width: number, height: number) => void;
   } = $props();
 
   let scrollTop = $state(0);
@@ -31,6 +33,31 @@
   const endIndex = $derived(Math.min(items.length, endRow * columns));
   const visibleItems = $derived(items.slice(startIndex, endIndex));
   const offsetY = $derived(startRow * itemHeight);
+
+  // Single internal ResizeObserver — replaces bind:clientHeight
+  $effect(() => {
+    if (!containerEl) return;
+    let rafId: number | null = null;
+    const ro = new ResizeObserver((entries) => {
+      // Debounce via rAF to avoid layout thrashing
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        const rect = entries[0]?.contentRect;
+        if (rect) {
+          const h = Math.round(rect.height);
+          const w = Math.round(rect.width);
+          if (h !== clientHeight) clientHeight = h;
+          if (onresize) onresize(w, h);
+        }
+      });
+    });
+    ro.observe(containerEl);
+    return () => {
+      ro.disconnect();
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  });
 
   function onScroll(e: Event) {
     scrollTop = (e.target as HTMLElement).scrollTop;
@@ -51,7 +78,6 @@
   class="virtual-scroller {className}"
   style={extraStyle}
   bind:this={containerEl}
-  bind:clientHeight
   onscroll={onScroll}
 >
   <div class="virtual-spacer" style="height: {totalHeight}px">

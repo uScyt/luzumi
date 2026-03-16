@@ -455,13 +455,10 @@ class FileManager {
   }
 
   private _dirSignature(arr: FileEntry[]): string {
-    // Lightweight signature for huge dirs: count + first/last entry info
-    if (arr.length > 10000) {
-      const first = arr[0];
-      const last = arr[arr.length - 1];
-      return `${arr.length}|${first?.modified ?? 0}|${first?.path ?? ""}|${last?.modified ?? 0}|${last?.path ?? ""}`;
-    }
-    return arr.map(e => e.path + e.size + (e.modified ?? 0) + (e.permissionsMode ?? 0)).sort().join("|");
+    // Lightweight O(1) signature: count + first/last entry path + modified
+    const first = arr[0];
+    const last = arr[arr.length - 1];
+    return `${arr.length}|${first?.path ?? ""}|${first?.modified ?? 0}|${last?.path ?? ""}|${last?.modified ?? 0}`;
   }
 
   async startWatch(path: string) {
@@ -896,16 +893,24 @@ class FileManager {
   async refreshGitStatus(path: string) {
     try {
       this.gitStatus = await invoke<{ is_repo: boolean; branch: string; modified: string[]; staged: string[]; untracked: string[] } | null>("cmd_get_git_status", { path });
-    } catch { this.gitStatus = null; }
+      this._buildGitStatusMap();
+    } catch { this.gitStatus = null; this._gitStatusMap = new Map(); }
+  }
+
+  private _gitStatusMap = new Map<string, string>();
+
+  private _buildGitStatusMap() {
+    const m = new Map<string, string>();
+    if (!this.gitStatus?.is_repo) { this._gitStatusMap = m; return; }
+    for (const f of this.gitStatus.untracked) { m.set(baseName(f), "untracked"); }
+    for (const f of this.gitStatus.modified) { m.set(baseName(f), "modified"); }
+    for (const f of this.gitStatus.staged) { m.set(baseName(f), "staged"); }
+    this._gitStatusMap = m;
   }
 
   getGitFileStatus(filePath: string): string | null {
     if (!this.gitStatus?.is_repo) return null;
-    const name = baseName(filePath);
-    if (this.gitStatus.staged.some(f => f === name || f.endsWith("/" + name))) return "staged";
-    if (this.gitStatus.modified.some(f => f === name || f.endsWith("/" + name))) return "modified";
-    if (this.gitStatus.untracked.some(f => f === name || f.endsWith("/" + name))) return "untracked";
-    return null;
+    return this._gitStatusMap.get(baseName(filePath)) ?? null;
   }
 
   toggleSplitView() {
