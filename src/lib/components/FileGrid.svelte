@@ -258,17 +258,20 @@
 
   let scrollerEl: VirtualScroller;
 
-  // Only reload thumbnails when directory changes, not on every scroll/filter
-  let lastThumbPath = "";
+  // Reload thumbnails when directory changes or entries load
+  let lastThumbKey = "";
   $effect(() => {
-    const path = fm.currentPath;
-    if (path === lastThumbPath) return;
-    lastThumbPath = path;
-    // Clear caches for new directory
-    requestedThumbs.clear();
-    pendingThumbs = [];
-    thumbnails = new Map();
-    // Queue visible images
+    const key = `${fm.currentPath}|${fm.entries.length}`;
+    if (key === lastThumbKey) return;
+    const isNewDir = !lastThumbKey.startsWith(fm.currentPath + "|");
+    lastThumbKey = key;
+    if (isNewDir) {
+      // Clear caches for new directory
+      requestedThumbs.clear();
+      pendingThumbs = [];
+      thumbnails = new Map();
+    }
+    // Queue thumbnails for entries not yet requested
     for (const entry of fm.entries) {
       const ext = entry.extension?.toLowerCase() ?? "";
       const sizeLimit = VIDEO_EXTS.has(ext) ? 2 * 1024 * 1024 * 1024 : 10 * 1024 * 1024;

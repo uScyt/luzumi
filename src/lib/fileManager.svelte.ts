@@ -1176,6 +1176,7 @@ class FileManager {
       if (config) {
         this.pickerConfig = config;
         this.pickerFileName = config.current_name ?? "";
+        this.showPreview = true;
         if (config.current_folder) {
           await this.navigate(config.current_folder);
         }

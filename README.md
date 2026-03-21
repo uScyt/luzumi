@@ -63,7 +63,7 @@
 **Secure by design**
 - pkexec auto-elevation
 - Multi-pass secure delete
-- Path validation & symlink safety
+- Input validation & path traversal protection
 
 </td>
 </tr>
@@ -103,7 +103,7 @@
 - **GVFS support** — GNOME network mounts (SMB, NFS, SSHFS)
 
 ### System Integration
-- **XDG Desktop Portal** — System-wide file picker
+- **XDG Desktop Portal** — System-wide file picker with preview pane
 - **Open With** — Launch files with any installed app
 - **Set as default file manager** — One-click setup
 - **Open terminal here** — Launch terminal in current directory
