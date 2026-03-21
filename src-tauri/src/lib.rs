@@ -229,6 +229,9 @@ async fn cmd_copy_as(source: String, dest: String) -> Result<(), String> {
 
 #[tauri::command]
 fn cmd_create_file(parent: String, name: String) -> Result<(), String> {
+    if name.contains('/') || name.contains("..") || name.contains('\0') {
+        return Err("Invalid file name".into());
+    }
     let path = Path::new(&parent).join(&name);
     fs::File::create(&path).map(|_| ()).map_err(|e| e.to_string())
 }
@@ -698,7 +701,12 @@ fn cmd_submit_picker_result(
         return Err("No response file configured".into());
     }
     let result = serde_json::json!({ "response": 0, "uris": uris });
-    fs::write(&response_file, result.to_string()).map_err(|e| e.to_string())?;
+    {
+        use std::io::Write;
+        let mut f = fs::File::create(&response_file).map_err(|e| e.to_string())?;
+        f.write_all(result.to_string().as_bytes()).map_err(|e| e.to_string())?;
+        f.sync_all().map_err(|e| e.to_string())?;
+    }
     app.exit(0);
     Ok(())
 }
@@ -714,7 +722,12 @@ fn cmd_cancel_picker(
     if !response_file.is_empty() {
         let empty: Vec<String> = vec![];
         let result = serde_json::json!({ "response": 1, "uris": empty });
-        fs::write(&response_file, result.to_string()).map_err(|e| e.to_string())?;
+        {
+            use std::io::Write;
+            let mut f = fs::File::create(&response_file).map_err(|e| e.to_string())?;
+            f.write_all(result.to_string().as_bytes()).map_err(|e| e.to_string())?;
+            f.sync_all().map_err(|e| e.to_string())?;
+        }
     }
     app.exit(0);
     Ok(())

@@ -252,10 +252,16 @@ pub fn elevated_read_directory(path: &Path, show_hidden: bool) -> Result<Vec<Fil
 }
 
 pub fn create_directory(parent: &Path, name: &str) -> Result<(), String> {
+    if name.contains('/') || name.contains("..") || name.contains('\0') {
+        return Err("Invalid directory name".into());
+    }
     fs::create_dir(parent.join(name)).map_err(|e| e.to_string())
 }
 
 pub fn rename_entry(from: &Path, new_name: &str) -> Result<(), String> {
+    if new_name.contains('/') || new_name.contains('\0') {
+        return Err("Invalid file name".into());
+    }
     let parent = from.parent().ok_or("Cannot rename root")?;
     fs::rename(from, parent.join(new_name)).map_err(|e| e.to_string())
 }
@@ -722,8 +728,9 @@ pub fn read_thumbnail(path: &Path) -> Result<String, String> {
 
 fn read_video_thumbnail(path: &Path) -> Result<String, String> {
     use std::process::Command;
+    use std::time::Duration;
 
-    let output = Command::new("ffmpeg")
+    let mut child = Command::new("ffmpeg")
         .args([
             "-ss", "1",
             "-i", &path.to_string_lossy(),
@@ -735,8 +742,28 @@ fn read_video_thumbnail(path: &Path) -> Result<String, String> {
         ])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .output()
+        .spawn()
         .map_err(|e| format!("ffmpeg not found: {}", e))?;
+
+    // Timeout: kill ffmpeg if it takes more than 5 seconds
+    let timeout = Duration::from_secs(5);
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => break,
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err("ffmpeg timeout".to_string());
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => return Err(format!("ffmpeg error: {}", e)),
+        }
+    }
+
+    let output = child.wait_with_output().map_err(|e| format!("ffmpeg error: {}", e))?;
 
     if !output.status.success() || output.stdout.is_empty() {
         return Err("Failed to extract video thumbnail".to_string());
