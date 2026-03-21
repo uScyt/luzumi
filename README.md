@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src-tauri/icons/app-icon.png" width="120" alt="Luzumi" />
+  <img src="src-tauri/icons/archive.png" width="120" alt="Luzumi" />
 </p>
 
 <h1 align="center">Luzumi</h1>
