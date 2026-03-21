@@ -219,7 +219,7 @@
     {#if fm.splitView && !fm.isPickerMode}
       <SplitPane />
     {/if}
-    {#if fm.showPreview}
+    {#if fm.showPreview && !fm.isPickerMode}
       <PreviewPane />
     {/if}
   </div>
