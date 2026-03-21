@@ -110,9 +110,9 @@
   }
 
   .tab.drop-target {
-    background: rgba(138, 173, 244, 0.12);
+    background: var(--blue-muted);
     color: var(--blue);
-    border-top: 2px solid rgba(138, 173, 244, 0.5);
+    border-top: 2px solid var(--blue-border-strong);
   }
 
   .tab-icon {

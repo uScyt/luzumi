@@ -33,15 +33,18 @@
 
   function updateRubberSelection(ctrl: boolean) {
     if (!rubberBox || !containerEl) return;
-    const { x1, y1, x2, y2 } = rubberBox;
-    const minX = Math.min(x1, x2), maxX = Math.max(x1, x2);
+    const { y1, y2 } = rubberBox;
     const minY = Math.min(y1, y2), maxY = Math.max(y1, y2);
     const newSel = ctrl ? new Set(fm.selected) : new Set<string>();
-    for (const el of containerEl.querySelectorAll<HTMLElement>(".file-row[data-path]")) {
-      const r = el.getBoundingClientRect();
-      if (!(r.right < minX || r.left > maxX || r.bottom < minY || r.top > maxY)) {
-        newSel.add(el.dataset.path!);
-      }
+    const scroller = containerEl.querySelector<HTMLElement>(".virtual-scroller") ?? containerEl;
+    const rect = scroller.getBoundingClientRect();
+    const scrollTop = scroller.scrollTop;
+    const relMinY = minY - rect.top + scrollTop;
+    const relMaxY = maxY - rect.top + scrollTop;
+    const startIdx = Math.max(0, Math.floor(relMinY / listRowHeight));
+    const endIdx = Math.min(displayed.length - 1, Math.floor(relMaxY / listRowHeight));
+    for (let i = startIdx; i <= endIdx; i++) {
+      newSel.add(displayed[i].path);
     }
     fm.selected = newSel;
   }
@@ -160,8 +163,8 @@
   style="--row-h: {listRowHeight}px; --icon-s: {listIconSize}px; --col-icon-w: {colIconWidth}px"
   bind:this={containerEl}
   oncontextmenu={(e) => onContextMenu(e, null)}
-  ondragover={(e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; fm.dropTarget = null; }}
-  ondrop={(e) => { e.preventDefault(); fm.requestDrop(fm.currentPath); }}
+  ondragover={(e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = fm.dragPaths.length > 0 ? "move" : "copy"; fm.dropTarget = null; }}
+  ondrop={(e) => { e.preventDefault(); if (fm.dragPaths.length > 0) { fm.requestDrop(fm.currentPath); } else { const uriList = e.dataTransfer?.getData("text/uri-list"); if (uriList) { const paths = uriList.split("\r\n").filter((u: string) => u && !u.startsWith("#")).map((u: string) => decodeURI(u.replace(/^file:\/\//, ""))).filter(Boolean); if (paths.length > 0) fm.handleExternalDrop(paths, fm.currentPath); } } }}
   onmousedown={onContainerMouseDown}
   onclick={(e) => { if (!(e.target as HTMLElement).closest(".file-row")) fm.selected = new Set(); }}
   onkeydown={(e) => { if (e.key === "Escape") fm.selected = new Set(); }}
@@ -213,12 +216,12 @@
             ondblclick={() => onRowDblClick(entry)}
             oncontextmenu={(e) => onContextMenu(e, entry)}
             onkeydown={(e) => onRowKeyDown(e, entry)}
-            ondragstart={(e) => { if (e.dataTransfer) { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", entry.path); } fm.setDragPaths(entry); fm.startNativeDrag(entry); }}
+            ondragstart={(e) => { if (e.dataTransfer) { e.dataTransfer.effectAllowed = "copyMove"; e.dataTransfer.setData("text/plain", entry.path); const paths = fm.selected.has(entry.path) ? [...fm.selected] : [entry.path]; e.dataTransfer.setData("text/uri-list", paths.map(p => "file://" + encodeURI(p)).join("\r\n")); } fm.setDragPaths(entry); }}
             ondragend={() => { fm.dragPaths = []; fm.dropTarget = null; }}
             ondragenter={(e) => onRowDragEnter(e, entry)}
-            ondragover={(e) => { if (entry.kind === "directory" && !fm.dragPaths.includes(entry.path)) { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; fm.dropTarget = entry.path; } }}
+            ondragover={(e) => { if (entry.kind === "directory" && !fm.dragPaths.includes(entry.path)) { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer) e.dataTransfer.dropEffect = fm.dragPaths.length > 0 ? "move" : "copy"; fm.dropTarget = entry.path; } }}
             ondragleave={() => { if (fm.dropTarget === entry.path) fm.dropTarget = null; }}
-            ondrop={(e) => { if (entry.kind === "directory") { e.preventDefault(); e.stopPropagation(); fm.requestDrop(entry.path); } }}
+            ondrop={(e) => { if (entry.kind === "directory") { e.preventDefault(); e.stopPropagation(); if (fm.dragPaths.length > 0) { fm.requestDrop(entry.path); } else { const uriList = e.dataTransfer?.getData("text/uri-list"); if (uriList) { const paths = uriList.split("\r\n").filter((u: string) => u && !u.startsWith("#")).map((u: string) => decodeURI(u.replace(/^file:\/\//, ""))).filter(Boolean); if (paths.length > 0) fm.handleExternalDrop(paths, entry.path); } } } }}
             onmouseenter={(e) => onRowMouseEnter(e, entry)}
             onmouseleave={onRowMouseLeave}
             onmousemove={onRowMouseMove}
@@ -319,12 +322,12 @@
 
   .list-header {
     display: grid;
-    grid-template-columns: var(--col-icon-w, 34px) minmax(0, 1fr) 90px 160px;
+    grid-template-columns: var(--col-icon-w, 34px) minmax(0, 1fr) minmax(60px, 100px) minmax(100px, 180px);
     gap: 6px;
     padding: 0 14px;
     height: 32px;
     align-items: center;
-    background: rgba(24, 25, 38, 0.4);
+    background: var(--panel-bg-strong);
     backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;
@@ -375,7 +378,7 @@
 
   .file-row {
     display: grid;
-    grid-template-columns: var(--col-icon-w, 34px) minmax(0, 1fr) 90px 160px;
+    grid-template-columns: var(--col-icon-w, 34px) minmax(0, 1fr) minmax(60px, 100px) minmax(100px, 180px);
     gap: 6px;
     padding: 0 6px;
     height: var(--row-h, 33px);
@@ -387,7 +390,7 @@
   }
 
   .file-row:hover {
-    background: var(--hover-bg-subtle);
+    background: var(--hover-bg);
   }
 
   .file-row.selected {
@@ -407,8 +410,8 @@
   }
 
   .file-row.drop-target {
-    background: rgba(138, 173, 244, 0.18);
-    box-shadow: inset 0 0 0 1.5px rgba(138, 173, 244, 0.5);
+    background: var(--blue-bg);
+    box-shadow: inset 0 0 0 1.5px var(--blue-border-strong);
   }
 
   .col-icon {
@@ -515,7 +518,7 @@
   :global(.rubber-band) {
     position: fixed;
     background: var(--accent-subtle);
-    border: 1px solid rgba(198, 160, 246, 0.4);
+    border: 1px solid var(--accent-border-strong);
     border-radius: 3px;
     pointer-events: none;
     z-index: 500;

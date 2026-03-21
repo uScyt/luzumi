@@ -47,12 +47,43 @@
   --accent-muted: rgba(198, 160, 246, 0.14);
   --accent-subtle: rgba(198, 160, 246, 0.08);
   --accent-bg: rgba(198, 160, 246, 0.5);
+  --accent-border: rgba(198, 160, 246, 0.3);
+  --accent-border-strong: rgba(198, 160, 246, 0.4);
+  --accent-glow: rgba(198, 160, 246, 0.15);
+  --accent-btn: rgba(198, 160, 246, 0.15);
+  --accent-btn-hover: rgba(198, 160, 246, 0.25);
+
+  --blue-subtle: rgba(138, 173, 244, 0.08);
+  --blue-muted: rgba(138, 173, 244, 0.12);
+  --blue-bg: rgba(138, 173, 244, 0.18);
+  --blue-bg-strong: rgba(138, 173, 244, 0.25);
+  --blue-border: rgba(138, 173, 244, 0.2);
+  --blue-border-strong: rgba(138, 173, 244, 0.5);
+  --blue-glow: rgba(138, 173, 244, 0.08);
 
   --hover-bg: rgba(202, 211, 245, 0.08);
   --hover-bg-subtle: rgba(202, 211, 245, 0.04);
   --hover-bg-strong: rgba(202, 211, 245, 0.12);
+
+  --danger-subtle: rgba(237, 135, 150, 0.06);
+  --danger-muted: rgba(237, 135, 150, 0.1);
   --danger-bg: rgba(237, 135, 150, 0.2);
+  --danger-border: rgba(237, 135, 150, 0.18);
+  --danger-border-strong: rgba(237, 135, 150, 0.3);
+  --danger-glow: rgba(237, 135, 150, 0.06);
+
+  --success-subtle: rgba(166, 218, 149, 0.1);
   --success-bg: rgba(166, 218, 149, 0.12);
+  --success-border: rgba(166, 218, 149, 0.55);
+
+  --input-bg: rgba(54, 58, 79, 0.3);
+  --input-bg-focus: rgba(54, 58, 79, 0.5);
+  --input-bg-strong: rgba(54, 58, 79, 0.4);
+  --input-bg-deep: rgba(54, 58, 79, 0.6);
+
+  --panel-bg: rgba(24, 25, 38, 0.35);
+  --panel-bg-strong: rgba(24, 25, 38, 0.4);
+  --panel-bg-muted: rgba(24, 25, 38, 0.25);
 
   --border-subtle: rgba(255, 255, 255, 0.04);
   --border-light: rgba(255, 255, 255, 0.06);
@@ -61,6 +92,15 @@
   --scrollbar-thumb: rgba(73, 77, 100, 0.4);
   --scrollbar-thumb-hover: rgba(91, 96, 120, 0.7);
   --selection-bg: rgba(198, 160, 246, 0.3);
+
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+
+  --titlebar-h: 38px;
+  --tabbar-h: 34px;
 }
 
 *, *::before, *::after {
@@ -113,6 +153,12 @@ input, textarea {
   background: var(--scrollbar-thumb-hover);
 }
 
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
 ::selection {
   background: var(--selection-bg);
 }
@@ -120,6 +166,11 @@ input, textarea {
 input, button {
   font-family: inherit;
   font-size: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 button {

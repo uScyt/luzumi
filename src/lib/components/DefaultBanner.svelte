@@ -28,8 +28,8 @@
     gap: 12px;
     height: 36px;
     padding: 0 14px;
-    background: rgba(138, 173, 244, 0.07);
-    border-bottom: 1px solid rgba(138, 173, 244, 0.12);
+    background: var(--blue-subtle);
+    border-bottom: 1px solid var(--blue-muted);
     flex-shrink: 0;
   }
 
@@ -65,14 +65,14 @@
     font-size: 11px;
     padding: 3px 10px;
     border-radius: 6px;
-    background: rgba(198, 160, 246, 0.15);
+    background: var(--accent-glow);
     color: var(--mauve);
     transition: background 0.1s;
     white-space: nowrap;
   }
 
   .set-btn:hover {
-    background: rgba(198, 160, 246, 0.25);
+    background: var(--accent-btn-hover);
   }
 
   .dismiss-btn {

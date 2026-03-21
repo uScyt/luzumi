@@ -2,9 +2,11 @@
   import { invoke } from "@tauri-apps/api/core";
   import { fm } from "../fileManager.svelte";
   import { t } from "../i18n";
-  import { formatSize } from "../types";
+  import { formatSize, getFileIcon, getFileColor } from "../types";
+  import { renderIcon } from "../icons";
 
-  const IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "gif", "bmp", "svg", "webp", "ico", "avif"]);
+  const IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "gif", "bmp", "svg", "webp", "ico", "avif", "tiff", "tif", "heic", "heif", "jxl"]);
+  const VIDEO_EXTS = new Set(["mp4", "m4v", "mkv", "avi", "mov", "webm", "flv", "wmv", "mpg", "mpeg", "ogv", "ogg", "3gp", "ts", "mts", "m2ts", "vob"]);
   const TEXT_EXTS = new Set([
     "txt", "md", "json", "js", "ts", "tsx", "jsx", "svelte", "html", "css", "scss",
     "rs", "toml", "yaml", "yml", "xml", "csv", "log", "sh", "bash", "zsh",
@@ -15,6 +17,7 @@
   const MAX_PREVIEW_LINES = 100;
 
   let thumbnail = $state<string | null>(null);
+  let thumbFailed = $state(false);
   let textContent = $state<string | null>(null);
   let loadingPreview = $state(false);
   let lastPath = $state("");
@@ -27,6 +30,7 @@
 
   const ext = $derived(selectedEntry?.extension?.toLowerCase() ?? "");
   const isImage = $derived(IMAGE_EXTS.has(ext));
+  const isVideo = $derived(VIDEO_EXTS.has(ext));
   const isText = $derived(TEXT_EXTS.has(ext));
 
   $effect(() => {
@@ -34,13 +38,14 @@
     if (!entry || entry.path === lastPath) return;
     lastPath = entry.path;
     thumbnail = null;
+    thumbFailed = false;
     textContent = null;
 
-    if (entry.kind === "file" && isImage) {
+    if (entry.kind === "file" && (isImage || isVideo)) {
       loadingPreview = true;
       invoke<string>("cmd_read_thumbnail", { path: entry.path })
         .then(d => { thumbnail = d; })
-        .catch(() => {})
+        .catch(() => { thumbFailed = true; })
         .finally(() => { loadingPreview = false; });
     } else if (entry.kind === "file" && isText) {
       loadingPreview = true;
@@ -78,7 +83,14 @@
         </div>
       {:else if thumbnail}
         <div class="image-preview">
-          <img src="data:image/{ext};base64,{thumbnail}" alt={selectedEntry.name} />
+          <img src={thumbnail} alt={selectedEntry.name} onerror={() => { thumbnail = null; thumbFailed = true; }} />
+        </div>
+      {:else if thumbFailed && selectedEntry}
+        <div class="fallback-icon">
+          <svg width="48" height="48" viewBox="0 0 16 16" style="color: {getFileColor(selectedEntry)}">
+            {@html renderIcon(getFileIcon(selectedEntry))}
+          </svg>
+          <span class="fallback-label">{selectedEntry.extension?.toUpperCase()}</span>
         </div>
       {:else if textContent !== null}
         <pre class="text-preview">{textContent}</pre>
@@ -108,6 +120,22 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+
+  .fallback-icon {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .fallback-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--overlay1);
+    letter-spacing: 0.04em;
   }
 
   .empty {

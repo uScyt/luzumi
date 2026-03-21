@@ -112,7 +112,7 @@
   .field-input {
     flex: 1;
     min-width: 0;
-    background: rgba(54, 58, 79, 0.5);
+    background: var(--input-bg-focus);
     border: 1.5px solid var(--border-medium);
     border-radius: 8px;
     padding: 7px 12px;
@@ -124,8 +124,8 @@
   }
 
   .field-input:focus {
-    border-color: rgba(138, 173, 244, 0.5);
-    box-shadow: 0 0 0 2px rgba(138, 173, 244, 0.12);
+    border-color: var(--blue-border-strong);
+    box-shadow: 0 0 0 2px var(--blue-muted);
   }
 
   .filter-field {
@@ -134,7 +134,7 @@
   }
 
   .field-select {
-    background: rgba(54, 58, 79, 0.5);
+    background: var(--input-bg-focus);
     border: 1.5px solid var(--border-medium);
     border-radius: 8px;
     padding: 6px 10px;
@@ -154,7 +154,7 @@
   }
 
   .field-select:focus {
-    border-color: rgba(138, 173, 244, 0.5);
+    border-color: var(--blue-border-strong);
   }
 
   .field-select option {

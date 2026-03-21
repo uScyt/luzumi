@@ -24,7 +24,8 @@ export const svgPaths: Record<string, string> = {
   FilePresentation: `<path d="M4 2H10L14 6V14C14 14.55 13.55 15 13 15H4C3.45 15 3 14.55 3 14V3C3 2.45 3.45 2 4 2Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="currentColor" opacity=".08"/><path d="M9.5 2V6.5H14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><rect x="5.5" y="9" width="5" height="3.5" rx=".8" stroke="currentColor" stroke-width="1.1"/><path d="M7.5 11L9 10.5V12L7.5 11Z" fill="currentColor" opacity=".8"/>`,
 
   // --- Archives & packages ---
-  FileArchive:   `<path d="M4 2H10L14 6V14C14 14.55 13.55 15 13 15H4C3.45 15 3 14.55 3 14V3C3 2.45 3.45 2 4 2Z" stroke="currentColor" stroke-width="1.4" fill="currentColor" opacity=".08"/><path d="M9.5 2V6.5H14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M7 8H9M7 10H9M7 12H9M7 14H9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>`,
+  FileArchive:   `<path d="M4 2H10L14 6V14C14 14.55 13.55 15 13 15H4C3.45 15 3 14.55 3 14V3C3 2.45 3.45 2 4 2Z" stroke="currentColor" stroke-width="1.4" fill="currentColor" opacity=".08"/><path d="M9.5 2V6.5H14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><rect x="6.5" y="9" width="4" height="5" rx=".8" stroke="currentColor" stroke-width="1.1" fill="currentColor" opacity=".1"/><path d="M7.5 10.5H9.5M7.5 12.5H9.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><path d="M8 9V8.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>`,
+  FileJar:       `<path d="M4 2H10L14 6V14C14 14.55 13.55 15 13 15H4C3.45 15 3 14.55 3 14V3C3 2.45 3.45 2 4 2Z" stroke="currentColor" stroke-width="1.4" fill="currentColor" opacity=".08"/><path d="M9.5 2V6.5H14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><rect x="6" y="9.5" width="5" height="4.5" rx="1" stroke="currentColor" stroke-width="1.1" fill="currentColor" opacity=".12"/><path d="M6.5 9.5V9C6.5 8.45 6.95 8 7.5 8H9.5C10.05 8 10.5 8.45 10.5 9V9.5" stroke="currentColor" stroke-width="1.1" fill="none"/><path d="M11 11.5H12C12.28 11.5 12.5 11.72 12.5 12V12.5C12.5 12.78 12.28 13 12 13H11" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/>`,
   Package:       `<path d="M8 2L14 5.5V10.5L8 14L2 10.5V5.5L8 2Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" fill="currentColor" opacity=".1"/><path d="M8 2V14M2 5.5L8 9L14 5.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>`,
 
   // --- System & tools ---
@@ -273,6 +274,67 @@ export const svgPaths: Record<string, string> = {
 
   // Prolog — ?
   LangProlog:    `<circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.3" fill="currentColor" opacity=".1"/><text x="8" y="11.5" font-size="9" font-weight="700" fill="currentColor" font-family="serif" text-anchor="middle">?</text>`,
+
+  // --- Additional language icons ---
+
+  // F# — F sharp
+  LangFSharp:    `<rect x="1.5" y="1.5" width="13" height="13" rx="2.5" stroke="currentColor" stroke-width="1.3" fill="currentColor" opacity=".12"/><text x="8" y="11.5" font-size="7.5" font-weight="800" fill="currentColor" font-family="system-ui,sans-serif" text-anchor="middle">F#</text>`,
+
+  // VB.NET — VB
+  LangVB:        `<rect x="1" y="2.5" width="14" height="11" rx="2.5" stroke="currentColor" stroke-width="1.3" fill="currentColor" opacity=".1"/><text x="8" y="10.8" font-size="6" font-weight="700" fill="currentColor" font-family="system-ui,sans-serif" text-anchor="middle">VB</text>`,
+
+  // Idris — dependent type lambda
+  LangIdris:     `<rect x="1.5" y="1.5" width="13" height="13" rx="2.5" stroke="currentColor" stroke-width="1.3" fill="currentColor" opacity=".1"/><text x="8" y="12" font-size="10" font-weight="400" fill="currentColor" font-family="serif" text-anchor="middle">Σ</text>`,
+
+  // Lean — L
+  LangLean:      `<rect x="1.5" y="1.5" width="13" height="13" rx="2.5" stroke="currentColor" stroke-width="1.3" fill="currentColor" opacity=".1"/><path d="M5 4.5V11.5H11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`,
+
+  // Agda — A with overline
+  LangAgda:      `<rect x="1.5" y="1.5" width="13" height="13" rx="2.5" stroke="currentColor" stroke-width="1.3" fill="currentColor" opacity=".1"/><path d="M5 12L8 4.5L11 12M6 10H10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M5 3.5H11" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>`,
+
+  // Coq — rooster comb / Cq
+  LangCoq:       `<rect x="1.5" y="1.5" width="13" height="13" rx="2.5" stroke="currentColor" stroke-width="1.3" fill="currentColor" opacity=".1"/><text x="8" y="11" font-size="6" font-weight="700" fill="currentColor" font-family="system-ui,sans-serif" text-anchor="middle">Coq</text>`,
+
+  // Forth — 4th
+  LangForth:     `<rect x="1.5" y="1.5" width="13" height="13" rx="2.5" stroke="currentColor" stroke-width="1.3" fill="currentColor" opacity=".1"/><text x="8" y="11" font-size="6" font-weight="700" fill="currentColor" font-family="monospace" text-anchor="middle">4th</text>`,
+
+  // Red — R in circle
+  LangRed:       `<circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" fill="currentColor" opacity=".12"/><text x="8" y="11" font-size="8" font-weight="800" fill="currentColor" font-family="system-ui,sans-serif" text-anchor="middle">R</text><circle cx="11" cy="5" r="1" fill="currentColor"/>`,
+
+  // Pony — P
+  LangPony:      `<rect x="1.5" y="1.5" width="13" height="13" rx="2.5" stroke="currentColor" stroke-width="1.3" fill="currentColor" opacity=".12"/><text x="8" y="11.5" font-size="8" font-weight="800" fill="currentColor" font-family="system-ui,sans-serif" text-anchor="middle">P</text><path d="M5 3H11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>`,
+
+  // Chapel — Ch
+  LangChapel:    `<rect x="1.5" y="1.5" width="13" height="13" rx="2.5" stroke="currentColor" stroke-width="1.3" fill="currentColor" opacity=".1"/><text x="8" y="11" font-size="6.5" font-weight="700" fill="currentColor" font-family="system-ui,sans-serif" text-anchor="middle">Ch</text>`,
+
+  // Factor — f
+  LangFactor:    `<rect x="1.5" y="1.5" width="13" height="13" rx="2.5" stroke="currentColor" stroke-width="1.3" fill="currentColor" opacity=".1"/><text x="8" y="11.5" font-size="9" font-weight="700" fill="currentColor" font-family="serif" text-anchor="middle">f</text>`,
+
+  // AWK
+  LangAwk:       `<rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" stroke-width="1.3" fill="currentColor" opacity=".1"/><text x="8" y="10.8" font-size="5.5" font-weight="700" fill="currentColor" font-family="monospace" text-anchor="middle">awk</text>`,
+
+  // AppleScript — AS
+  LangAppleScript:`<rect x="1.5" y="1.5" width="13" height="13" rx="2.5" stroke="currentColor" stroke-width="1.3" fill="currentColor" opacity=".1"/><text x="8" y="11" font-size="6.5" font-weight="700" fill="currentColor" font-family="system-ui,sans-serif" text-anchor="middle">AS</text>`,
+
+  // --- Additional file type icons ---
+
+  // ML model / weights — brain/neural
+  FileML:        `<path d="M4 2H10L14 6V14C14 14.55 13.55 15 13 15H4C3.45 15 3 14.55 3 14V3C3 2.45 3.45 2 4 2Z" stroke="currentColor" stroke-width="1.4" fill="currentColor" opacity=".08"/><path d="M9.5 2V6.5H14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="6.5" cy="10" r="1" stroke="currentColor" stroke-width=".9" fill="currentColor" opacity=".15"/><circle cx="9.5" cy="10" r="1" stroke="currentColor" stroke-width=".9" fill="currentColor" opacity=".15"/><circle cx="8" cy="13" r="1" stroke="currentColor" stroke-width=".9" fill="currentColor" opacity=".15"/><path d="M6.5 10L8 13M9.5 10L8 13M6.5 10H9.5" stroke="currentColor" stroke-width=".8" stroke-linecap="round"/>`,
+
+  // Git file — branch icon
+  FileGit:       `<path d="M4 2H10L14 6V14C14 14.55 13.55 15 13 15H4C3.45 15 3 14.55 3 14V3C3 2.45 3.45 2 4 2Z" stroke="currentColor" stroke-width="1.4" fill="currentColor" opacity=".08"/><path d="M9.5 2V6.5H14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="7" cy="10" r="1" stroke="currentColor" stroke-width="1" fill="currentColor" opacity=".15"/><circle cx="10" cy="13" r="1" stroke="currentColor" stroke-width="1" fill="currentColor" opacity=".15"/><path d="M7 11V14M8 12.5C8 11.5 9 11 10 12" stroke="currentColor" stroke-width="1" stroke-linecap="round" fill="none"/>`,
+
+  // License — scale/balance
+  FileLicense:   `<path d="M4 2H10L14 6V14C14 14.55 13.55 15 13 15H4C3.45 15 3 14.55 3 14V3C3 2.45 3.45 2 4 2Z" stroke="currentColor" stroke-width="1.4" fill="currentColor" opacity=".08"/><path d="M9.5 2V6.5H14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8 9V13.5M5.5 10.5L8 9L10.5 10.5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M5 10.5L4.5 12H6.5L6 10.5M10 10.5L9.5 12H11.5L11 10.5" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`,
+
+  // Changelog — list with arrow
+  FileChangelog: `<path d="M4 2H10L14 6V14C14 14.55 13.55 15 13 15H4C3.45 15 3 14.55 3 14V3C3 2.45 3.45 2 4 2Z" stroke="currentColor" stroke-width="1.4" fill="currentColor" opacity=".08"/><path d="M9.5 2V6.5H14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M7 10H10.5M7 12H9.5M7 14H10" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><circle cx="5.5" cy="10" r=".5" fill="currentColor"/><circle cx="5.5" cy="12" r=".5" fill="currentColor"/><circle cx="5.5" cy="14" r=".5" fill="currentColor"/>`,
+
+  // Readme — open book
+  FileReadme:    `<path d="M4 2H10L14 6V14C14 14.55 13.55 15 13 15H4C3.45 15 3 14.55 3 14V3C3 2.45 3.45 2 4 2Z" stroke="currentColor" stroke-width="1.4" fill="currentColor" opacity=".08"/><path d="M9.5 2V6.5H14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M5.5 9C6.5 8.5 7.5 8.5 8 9V14C7.5 13.5 6.5 13.5 5.5 14V9Z" stroke="currentColor" stroke-width="1" fill="currentColor" opacity=".1"/><path d="M10.5 9C9.5 8.5 8.5 8.5 8 9V14C8.5 13.5 9.5 13.5 10.5 14V9Z" stroke="currentColor" stroke-width="1" fill="currentColor" opacity=".1"/>`,
+
+  // Env file — key=value
+  FileEnv:       `<path d="M4 2H10L14 6V14C14 14.55 13.55 15 13 15H4C3.45 15 3 14.55 3 14V3C3 2.45 3.45 2 4 2Z" stroke="currentColor" stroke-width="1.4" fill="currentColor" opacity=".08"/><path d="M9.5 2V6.5H14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M6 10H7.5M9 10H10M6 12H8M9.5 12H10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><circle cx="5" cy="10" r=".5" fill="currentColor"/><circle cx="5" cy="12" r=".5" fill="currentColor"/>`,
 
   // ISO / disc image
   FileISO:       `<circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4" fill="currentColor" opacity=".08"/><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="8" cy="8" r="4.5" stroke="currentColor" stroke-width=".7" fill="none" opacity=".4"/><circle cx="8" cy="8" r=".6" fill="currentColor"/>`,

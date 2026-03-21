@@ -100,8 +100,13 @@ export function getFileIcon(entry: FileEntry): string {
     if (["dockerfile","containerfile"].includes(name)) return "FileDocker";
     if (["docker-compose.yml","docker-compose.yaml","compose.yml","compose.yaml"].includes(name)) return "FileDocker";
     if (["makefile","gnumakefile","cmakelists.txt","justfile","rakefile","taskfile","gruntfile","gulpfile","vagrantfile","procfile","gemfile","brewfile"].includes(name)) return "FileBuild";
-    if (["license","licence","copying","authors","contributors","changelog","changes","history","news","readme","install","todo","notice"].includes(name)) return "FileText";
-    if ([".gitignore",".gitattributes",".gitmodules",".editorconfig",".prettierrc",".prettierignore",".eslintrc",".eslintignore",".stylelintrc",".babelrc",".npmrc",".nvmrc",".yarnrc",".env",".env.local",".env.production",".env.development",".env.staging",".env.test",".flake8",".pylintrc",".rubocop.yml",".clang-format",".clang-tidy",".rustfmt.toml"].includes(name)) return "FileConfig";
+    if (["license","licence","copying"].includes(name)) return "FileLicense";
+    if (["readme","readme.md","readme.txt","readme.rst"].includes(name)) return "FileReadme";
+    if (["changelog","changes","history","news","releases"].includes(name)) return "FileChangelog";
+    if (["authors","contributors","install","todo","notice"].includes(name)) return "FileText";
+    if ([".gitignore",".gitattributes",".gitmodules",".gitkeep"].includes(name)) return "FileGit";
+    if ([".env",".env.local",".env.production",".env.development",".env.staging",".env.test"].includes(name)) return "FileEnv";
+    if ([".editorconfig",".prettierrc",".prettierignore",".eslintrc",".eslintignore",".stylelintrc",".babelrc",".npmrc",".nvmrc",".yarnrc",".flake8",".pylintrc",".rubocop.yml",".clang-format",".clang-tidy",".rustfmt.toml"].includes(name)) return "FileConfig";
     if ([".dockerignore"].includes(name)) return "FileDocker";
     if ([".ssh","authorized_keys","known_hosts","id_rsa","id_ed25519","id_ecdsa"].includes(name)) return "FileKey";
     if (!ext) return "File";
@@ -395,7 +400,10 @@ export function getFileIcon(entry: FileEntry): string {
   if (["c","h"].includes(ext)) return "LangC";
   if (["cpp","hpp","cc","cxx","hh","hxx","c++","h++","ino","pde"].includes(ext)) return "LangCpp";
   if (["cs","csx"].includes(ext)) return "LangCSharp";
-  if (["java","jar","class"].includes(ext)) return "LangJava";
+  if (["fs","fsx","fsi"].includes(ext)) return "LangFSharp";
+  if (["vb","vbs"].includes(ext)) return "LangVB";
+  if (ext === "jar") return "FileJar";
+  if (["java","class"].includes(ext)) return "LangJava";
   if (["php","php3","php4","php5","phtml","blade"].includes(ext)) return "LangPHP";
   if (["rb","erb","rake","gemspec","ru"].includes(ext)) return "LangRuby";
   if (ext === "swift") return "LangSwift";
@@ -450,6 +458,18 @@ export function getFileIcon(entry: FileEntry): string {
   if (["lisp","cl","el","emacs","scm","rkt","ss","fennel","fnl","janet","hy","carp"].includes(ext)) return "LangLisp";
   if (["tcl","tk"].includes(ext)) return "LangTcl";
   if (["pro","prolog"].includes(ext)) return "LangProlog";
+  if (["idr","ipkg"].includes(ext)) return "LangIdris";
+  if (["lean","lean4"].includes(ext)) return "LangLean";
+  if (["agda","lagda"].includes(ext)) return "LangAgda";
+  if (ext === "coq") return "LangCoq";
+  if (["fth","4th","forth"].includes(ext)) return "LangForth";
+  if (["red","reds"].includes(ext)) return "LangRed";
+  if (ext === "pony") return "LangPony";
+  if (["chpl","chapel"].includes(ext)) return "LangChapel";
+  if (ext === "factor") return "LangFactor";
+  if (["awk","gawk","mawk"].includes(ext)) return "LangAwk";
+  if (["applescript","scpt"].includes(ext)) return "LangAppleScript";
+  if (["h5","pb","onnx","pth","pt","weights","ckpt","safetensors","tflite","mlmodel","mar","pkl"].includes(ext)) return "FileML";
   if (["tex","latex","bib","bibtex"].includes(ext)) return "FileTex";
   if (["diff","patch"].includes(ext)) return "FileDiff";
   if (["map","js.map","css.map"].includes(ext)) return "FileSourceMap";
@@ -576,6 +596,19 @@ export function getFileColor(entry: FileEntry): string {
     LangLisp:     "var(--flamingo)",
     LangTcl:      "var(--peach)",
     LangProlog:   "var(--peach)",
+    LangFSharp:   "var(--blue)",
+    LangVB:       "var(--blue)",
+    LangIdris:    "var(--mauve)",
+    LangLean:     "var(--blue)",
+    LangAgda:     "var(--yellow)",
+    LangCoq:      "var(--peach)",
+    LangForth:    "var(--peach)",
+    LangRed:      "var(--red)",
+    LangPony:     "var(--flamingo)",
+    LangChapel:   "var(--teal)",
+    LangFactor:   "var(--peach)",
+    LangAwk:      "var(--green)",
+    LangAppleScript:"var(--lavender)",
     FileTex:      "var(--teal)",
     FileDiff:     "var(--green)",
     FileSourceMap:"var(--overlay1)",
@@ -597,6 +630,7 @@ export function getFileColor(entry: FileEntry): string {
     FileSubtitle: "var(--sky)",
     FilePdf:      "var(--red)",
     FileArchive:  "var(--peach)",
+    FileJar:      "var(--peach)",
     Package:      "var(--flamingo)",
     Gear:         "var(--overlay1)",
     TerminalWindow: "var(--green)",
@@ -623,6 +657,12 @@ export function getFileColor(entry: FileEntry): string {
     FileChip:     "var(--teal)",
     FileLog:      "var(--overlay1)",
     FileBackup:   "var(--overlay0)",
+    FileML:       "var(--pink)",
+    FileGit:      "var(--peach)",
+    FileLicense:  "var(--green)",
+    FileChangelog:"var(--blue)",
+    FileReadme:   "var(--sapphire)",
+    FileEnv:      "var(--yellow)",
     Link:         "var(--teal)",
     Folder:       "var(--blue)",
   };

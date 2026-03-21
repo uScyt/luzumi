@@ -9,9 +9,12 @@
   import VirtualScroller from "./VirtualScroller.svelte";
 
   const IMAGE_EXTS = new Set(["png","jpg","jpeg","gif","webp","bmp","svg","ico","tiff","tif","heic","heif","avif","jxl"]);
+  const VIDEO_EXTS = new Set(["mp4","m4v","mkv","avi","mov","webm","flv","wmv","mpg","mpeg","ogv","ogg","3gp","ts","mts","m2ts","vob"]);
 
-  function isImage(entry: FileEntry): boolean {
-    return entry.kind === "file" && !!entry.extension && IMAGE_EXTS.has(entry.extension.toLowerCase());
+  function hasThumbnail(entry: FileEntry): boolean {
+    if (entry.kind !== "file" || !entry.extension) return false;
+    const ext = entry.extension.toLowerCase();
+    return IMAGE_EXTS.has(ext) || VIDEO_EXTS.has(ext);
   }
 
   // Thumbnail cache — non-reactive internals to avoid cascade re-renders
@@ -44,7 +47,16 @@
             }, 50);
           }
         })
-        .catch(() => {})
+        .catch(() => {
+          // Mark as failed so we show the fallback icon
+          thumbnails.set(entry.path, "");
+          if (!thumbBatchTimer) {
+            thumbBatchTimer = setTimeout(() => {
+              thumbBatchTimer = null;
+              thumbnails = new Map(thumbnails);
+            }, 50);
+          }
+        })
         .finally(() => {
           activeLoads--;
           drainThumbQueue();
@@ -82,10 +94,25 @@
     const minX = Math.min(x1, x2), maxX = Math.max(x1, x2);
     const minY = Math.min(y1, y2), maxY = Math.max(y1, y2);
     const newSel = ctrl ? new Set(fm.selected) : new Set<string>();
-    for (const el of containerEl.querySelectorAll<HTMLElement>(".grid-card[data-path]")) {
-      const r = el.getBoundingClientRect();
-      if (!(r.right < minX || r.left > maxX || r.bottom < minY || r.top > maxY)) {
-        newSel.add(el.dataset.path!);
+    const scroller = containerEl.querySelector<HTMLElement>(".virtual-scroller") ?? containerEl;
+    const rect = scroller.getBoundingClientRect();
+    const scrollTop = scroller.scrollTop;
+    const relMinY = minY - rect.top + scrollTop;
+    const relMaxY = maxY - rect.top + scrollTop;
+    const relMinX = minX - rect.left;
+    const relMaxX = maxX - rect.left;
+    const cols = gridColumns;
+    const colWidth = (gridContainerWidth - 32) / cols; // 32=padding
+    const startRow = Math.max(0, Math.floor(relMinY / cardRowHeight));
+    const endRow = Math.min(Math.ceil(displayed.length / cols) - 1, Math.floor(relMaxY / cardRowHeight));
+    const startCol = Math.max(0, Math.floor(relMinX / colWidth));
+    const endCol = Math.min(cols - 1, Math.floor(relMaxX / colWidth));
+    for (let row = startRow; row <= endRow; row++) {
+      for (let col = startCol; col <= endCol; col++) {
+        const idx = row * cols + col;
+        if (idx < displayed.length) {
+          newSel.add(displayed[idx].path);
+        }
       }
     }
     fm.selected = newSel;
@@ -155,21 +182,41 @@
 
   function onDragStart(e: DragEvent, entry: FileEntry) {
     if (!e.dataTransfer) return;
-    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.effectAllowed = "copyMove";
     e.dataTransfer.setData("text/plain", entry.path);
+    const paths = fm.selected.has(entry.path) ? [...fm.selected] : [entry.path];
+    const uris = paths.map(p => "file://" + encodeURI(p)).join("\r\n");
+    e.dataTransfer.setData("text/uri-list", uris);
     fm.setDragPaths(entry);
-    fm.startNativeDrag(entry);
   }
 
   function onBgDragOver(e: DragEvent) {
     e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    if (e.dataTransfer) e.dataTransfer.dropEffect = fm.dragPaths.length > 0 ? "move" : "copy";
     fm.dropTarget = null;
   }
 
   function onBgDrop(e: DragEvent) {
     e.preventDefault();
-    fm.requestDrop(fm.currentPath);
+    if (fm.dragPaths.length > 0) {
+      fm.requestDrop(fm.currentPath);
+      return;
+    }
+    handleExternalDrop(e, fm.currentPath);
+  }
+
+  function handleExternalDrop(e: DragEvent, dest: string) {
+    const uriList = e.dataTransfer?.getData("text/uri-list");
+    if (uriList) {
+      const paths = uriList.split("\r\n")
+        .filter(u => u && !u.startsWith("#"))
+        .map(u => decodeURI(u.replace(/^file:\/\//, "")))
+        .filter(Boolean);
+      if (paths.length > 0) {
+        fm.handleExternalDrop(paths, dest);
+        return;
+      }
+    }
   }
 
   function onCardDragEnter(e: DragEvent, entry: FileEntry) {
@@ -185,7 +232,7 @@
     if (fm.dragPaths.includes(entry.path)) return;
     e.preventDefault();
     e.stopPropagation();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    if (e.dataTransfer) e.dataTransfer.dropEffect = fm.dragPaths.length > 0 ? "move" : "copy";
     fm.dropTarget = entry.path;
   }
 
@@ -193,7 +240,11 @@
     if (entry.kind !== "directory") return;
     e.preventDefault();
     e.stopPropagation();
-    fm.requestDrop(entry.path);
+    if (fm.dragPaths.length > 0) {
+      fm.requestDrop(entry.path);
+    } else {
+      handleExternalDrop(e, entry.path);
+    }
   }
 
   const displayed = $derived(fm.filteredEntries());
@@ -219,7 +270,9 @@
     thumbnails = new Map();
     // Queue visible images
     for (const entry of fm.entries) {
-      if (isImage(entry) && (entry.size ?? 0) < 10 * 1024 * 1024) {
+      const ext = entry.extension?.toLowerCase() ?? "";
+      const sizeLimit = VIDEO_EXTS.has(ext) ? 2 * 1024 * 1024 * 1024 : 10 * 1024 * 1024;
+      if (hasThumbnail(entry) && (entry.size ?? 0) < sizeLimit) {
         queueThumbnail(entry);
       }
     }
@@ -281,7 +334,7 @@
             {@const isSelected = fm.selected.has(entry.path)}
             {@const isRenaming = fm.renameTarget === entry.path}
             {@const thumb = thumbnails.get(entry.path)}
-            {@const showThumb = isImage(entry) && thumb}
+            {@const showThumb = hasThumbnail(entry) && thumb}
             <div
               class="grid-card glass-card"
               class:selected={isSelected}
@@ -329,7 +382,7 @@
                     alt=""
                     class="thumb"
                     style="width: {fm.gridIconSize}px; height: {fm.gridIconSize}px"
-                    onerror={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    onerror={() => { thumbnails.set(entry.path, ""); thumbnails = new Map(thumbnails); }}
                   />
                 {:else}
                   <svg width={fm.gridIconSize} height={fm.gridIconSize} viewBox="0 0 16 16" style="color: {iconColor}">
@@ -400,7 +453,7 @@
     align-items: center;
     gap: 2px;
     padding: 5px 14px;
-    background: rgba(24, 25, 38, 0.35);
+    background: var(--panel-bg);
     backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;
@@ -480,8 +533,8 @@
 
   .grid-card.selected {
     background: var(--accent-muted);
-    border-color: rgba(198, 160, 246, 0.3);
-    box-shadow: 0 0 0 1px rgba(198, 160, 246, 0.15), 0 4px 16px rgba(0, 0, 0, 0.12);
+    border-color: var(--accent-border);
+    box-shadow: 0 0 0 1px var(--accent-glow), 0 4px 16px rgba(0, 0, 0, 0.12);
   }
 
   .grid-card.selected:hover {
@@ -498,9 +551,9 @@
   }
 
   .grid-card.drop-target {
-    background: rgba(138, 173, 244, 0.18);
-    border-color: rgba(138, 173, 244, 0.45);
-    box-shadow: 0 0 0 1px rgba(138, 173, 244, 0.25), 0 6px 20px rgba(138, 173, 244, 0.08);
+    background: var(--blue-bg);
+    border-color: var(--blue-border-strong);
+    box-shadow: 0 0 0 1px var(--blue-bg-strong), 0 6px 20px var(--blue-glow);
     transform: scale(1.02);
   }
 
@@ -624,7 +677,7 @@
   :global(.rubber-band) {
     position: fixed;
     background: var(--accent-subtle);
-    border: 1px solid rgba(198, 160, 246, 0.4);
+    border: 1px solid var(--accent-border-strong);
     border-radius: 3px;
     pointer-events: none;
     z-index: 500;

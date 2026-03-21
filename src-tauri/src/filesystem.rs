@@ -1,103 +1,32 @@
 use std::fs;
-use std::io::{Write, BufRead, BufReader};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio, Child, ChildStdin, ChildStdout};
-use std::sync::Mutex;
+use std::process::Command;
 use std::time::UNIX_EPOCH;
 use serde::{Deserialize, Serialize};
 
-static ROOT_SHELL: Mutex<Option<RootShell>> = Mutex::new(None);
+// Run a command via pkexec with direct argv (no shell, no injection risk)
+fn pkexec_run(program: &str, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("pkexec")
+        .arg(program)
+        .args(args)
+        .output()
+        .map_err(|e| format!("Failed to run pkexec {}: {}", program, e))?;
 
-struct RootShell {
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
-    child: Child,
-}
-
-impl RootShell {
-    fn launch() -> Result<Self, String> {
-        let mut child = Command::new("pkexec")
-            .arg("sh")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| format!("Failed to launch root shell: {}", e))?;
-
-        let stdin = child.stdin.take().ok_or("No stdin")?;
-        let stdout = BufReader::new(child.stdout.take().ok_or("No stdout")?);
-
-        Ok(RootShell { stdin, stdout, child })
-    }
-
-    fn exec(&mut self, cmd: &str) -> Result<String, String> {
-        let marker = format!("__LUZUMI_END_{}__", std::process::id());
-        let full_cmd = format!("{}\necho '{}'\n", cmd, marker);
-        self.stdin.write_all(full_cmd.as_bytes())
-            .map_err(|e| format!("Write to root shell failed: {}", e))?;
-        self.stdin.flush()
-            .map_err(|e| format!("Flush root shell failed: {}", e))?;
-
-        let mut output = String::new();
-        loop {
-            let mut line = String::new();
-            match self.stdout.read_line(&mut line) {
-                Ok(0) => return Err("Root shell closed unexpectedly".into()),
-                Ok(_) => {
-                    if line.trim() == marker {
-                        break;
-                    }
-                    output.push_str(&line);
-                }
-                Err(e) => return Err(format!("Read from root shell failed: {}", e)),
-            }
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let code = output.status.code().unwrap_or(-1);
+        if code == 126 || code == 127 {
+            return Err("Authentication cancelled or pkexec not found".into());
         }
-        Ok(output)
+        Err(format!("{}: {}", program, stderr.trim()))
     }
-
-    fn is_alive(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(None))
-    }
-}
-
-fn run_root_cmd(cmd: &str) -> Result<String, String> {
-    let mut guard = ROOT_SHELL.lock().map_err(|e| e.to_string())?;
-    let needs_launch = match guard.as_mut() {
-        Some(shell) => !shell.is_alive(),
-        None => true,
-    };
-
-    if needs_launch {
-        *guard = Some(RootShell::launch()?);
-    }
-
-    guard.as_mut().ok_or_else(|| "Root shell unavailable after launch".to_string())?.exec(cmd)
 }
 
 pub fn kill_root_shell() {
-    if let Ok(mut guard) = ROOT_SHELL.lock() {
-        if let Some(mut shell) = guard.take() {
-            let _ = shell.stdin.write_all(b"exit\n");
-            let _ = shell.stdin.flush();
-            drop(shell.stdin);
-            drop(shell.stdout);
-            let start = std::time::Instant::now();
-            loop {
-                match shell.child.try_wait() {
-                    Ok(Some(_)) => break,
-                    Ok(None) => {
-                        if start.elapsed() > std::time::Duration::from_secs(2) {
-                            let _ = shell.child.kill();
-                            let _ = shell.child.wait();
-                            break;
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(50));
-                    }
-                    Err(_) => break,
-                }
-            }
-        }
-    }
+    // No-op: root shell no longer exists. Kept for API compatibility.
 }
 
 pub fn check_path_readable(path: &Path) -> bool {
@@ -260,12 +189,11 @@ pub fn read_directory(path: &Path, show_hidden: bool) -> Result<Vec<FileEntry>, 
 }
 
 pub fn elevated_read_directory(path: &Path, show_hidden: bool) -> Result<Vec<FileEntry>, String> {
-    let path_str = shell_escape(path.to_string_lossy().as_ref())?;
-    let cmd = format!(
-        "find {} -maxdepth 1 -mindepth 1 -printf '%y\\t%s\\t%T@\\t%f\\n'",
-        path_str
-    );
-    let stdout = run_root_cmd(&cmd)?;
+    let path_str = path.to_string_lossy().to_string();
+    let stdout = pkexec_run("find", &[
+        &path_str, "-maxdepth", "1", "-mindepth", "1",
+        "-printf", "%y\\t%s\\t%T@\\t%f\\n",
+    ])?;
     let mut files: Vec<FileEntry> = stdout
         .lines()
         .filter_map(|line| {
@@ -485,8 +413,20 @@ pub fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
         let meta = entry.path().symlink_metadata().map_err(|e| e.to_string())?;
         if meta.is_symlink() {
             let target = fs::read_link(entry.path()).map_err(|e| e.to_string())?;
-            std::os::unix::fs::symlink(&target, dst.join(entry.file_name()))
-                .map_err(|e| e.to_string())?;
+            // Reject symlinks that point outside (absolute or containing ..)
+            if target.is_absolute() || target.components().any(|c| c == std::path::Component::ParentDir) {
+                // Copy the underlying file instead of recreating a dangerous symlink
+                let real = entry.path().canonicalize().map_err(|e| e.to_string())?;
+                let dest = dst.join(entry.file_name());
+                if real.is_dir() {
+                    copy_dir_all(&real, &dest)?;
+                } else {
+                    fs::copy(&real, &dest).map_err(|e| e.to_string())?;
+                }
+            } else {
+                std::os::unix::fs::symlink(&target, dst.join(entry.file_name()))
+                    .map_err(|e| e.to_string())?;
+            }
         } else if meta.is_dir() {
             copy_dir_all(&entry.path(), &dst.join(entry.file_name()))?;
         } else {
@@ -678,7 +618,15 @@ fn collect_drives(out: &mut Vec<DriveInfo>, dev: &LsblkDevice, parent_hotplug: b
     }
 }
 
+fn validate_device_path(device: &str) -> Result<(), String> {
+    if !device.starts_with("/dev/") || device.contains("..") || device.contains('\0') {
+        return Err("Invalid device path".into());
+    }
+    Ok(())
+}
+
 pub fn mount_drive(device: &str) -> Result<String, String> {
+    validate_device_path(device)?;
     let output = Command::new("udisksctl")
         .args(["mount", "-b", device, "--no-user-interaction"])
         .output()
@@ -700,12 +648,12 @@ pub fn mount_drive(device: &str) -> Result<String, String> {
 }
 
 pub fn unlock_drive(device: &str, password: &str) -> Result<String, String> {
+    validate_device_path(device)?;
     let mut child = Command::new("udisksctl")
         .args(["unlock", "-b", device, "--no-user-interaction"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .env("UDISKS2_PASSWORD", password)
         .spawn()
         .map_err(|e| e.to_string())?;
 
@@ -736,16 +684,25 @@ pub fn unlock_drive(device: &str, password: &str) -> Result<String, String> {
 }
 
 pub fn read_thumbnail(path: &Path) -> Result<String, String> {
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase().to_string())
+        .unwrap_or_default();
+
+    // Video formats — extract frame with ffmpeg
+    match ext.as_str() {
+        "mp4" | "m4v" | "mkv" | "avi" | "mov" | "webm" | "flv" | "wmv" | "mpg" | "mpeg"
+        | "ogv" | "ogg" | "3gp" | "ts" | "mts" | "m2ts" | "vob" => {
+            return read_video_thumbnail(path);
+        }
+        _ => {}
+    }
+
     let data = fs::read(path).map_err(|e| e.to_string())?;
 
     if data.len() > 50 * 1024 * 1024 {
         return Err("File too large for thumbnail".to_string());
     }
-
-    let ext = path
-        .extension()
-        .map(|e| e.to_string_lossy().to_lowercase().to_string())
-        .unwrap_or_default();
 
     let mime = match ext.as_str() {
         "png" => "image/png",
@@ -761,6 +718,33 @@ pub fn read_thumbnail(path: &Path) -> Result<String, String> {
     use base64::Engine;
     let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
     Ok(format!("data:{};base64,{}", mime, encoded))
+}
+
+fn read_video_thumbnail(path: &Path) -> Result<String, String> {
+    use std::process::Command;
+
+    let output = Command::new("ffmpeg")
+        .args([
+            "-ss", "1",
+            "-i", &path.to_string_lossy(),
+            "-vframes", "1",
+            "-vf", "scale=320:-1",
+            "-f", "image2pipe",
+            "-vcodec", "png",
+            "-",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .map_err(|e| format!("ffmpeg not found: {}", e))?;
+
+    if !output.status.success() || output.stdout.is_empty() {
+        return Err("Failed to extract video thumbnail".to_string());
+    }
+
+    use base64::Engine;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&output.stdout);
+    Ok(format!("data:image/png;base64,{}", encoded))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -927,37 +911,29 @@ fn calculate_dir_size_bounded(path: &Path, depth: u32) -> u64 {
 }
 
 pub fn authenticate_admin() -> Result<(), String> {
-    run_root_cmd("true").map(|_| ())
-}
-
-fn shell_escape(s: &str) -> Result<String, String> {
-    if s.contains('\0') {
-        return Err("Path contains null byte".into());
-    }
-    if s.bytes().any(|b| b < 0x20 && b != b'\t') {
-        return Err("Path contains control characters".into());
-    }
-    Ok(format!("'{}'", s.replace('\'', "'\\''")))
+    pkexec_run("true", &[]).map(|_| ())
 }
 
 pub fn elevated_move(from: &Path, to_dir: &Path) -> Result<(), String> {
     let name = from.file_name().ok_or("No filename")?;
     let dest = to_dir.join(name);
-    let cmd = format!("mv -f {} {}", shell_escape(&from.to_string_lossy())?, shell_escape(&dest.to_string_lossy())?);
-    run_root_cmd(&cmd).map(|_| ())
+    let from_s = from.to_string_lossy();
+    let dest_s = dest.to_string_lossy();
+    pkexec_run("mv", &["-f", "--", &from_s, &dest_s]).map(|_| ())
 }
 
 pub fn elevated_copy(from: &Path, to_dir: &Path) -> Result<(), String> {
     let name = from.file_name().ok_or("No filename")?;
     let dest = to_dir.join(name);
-    let cmd = format!("cp -a {} {}", shell_escape(&from.to_string_lossy())?, shell_escape(&dest.to_string_lossy())?);
-    run_root_cmd(&cmd).map(|_| ())
+    let from_s = from.to_string_lossy();
+    let dest_s = dest.to_string_lossy();
+    pkexec_run("cp", &["-a", "--", &from_s, &dest_s]).map(|_| ())
 }
 
 pub fn elevated_delete(paths: &[&Path]) -> Result<(), String> {
     for p in paths {
-        let cmd = format!("rm -rf {}", shell_escape(&p.to_string_lossy())?);
-        run_root_cmd(&cmd)?;
+        let p_s = p.to_string_lossy();
+        pkexec_run("rm", &["-rf", "--", &p_s])?;
     }
     Ok(())
 }
@@ -968,8 +944,9 @@ pub fn elevated_rename(from: &Path, new_name: &str) -> Result<(), String> {
     }
     let parent = from.parent().ok_or("Cannot rename root")?;
     let dest = parent.join(new_name);
-    let cmd = format!("mv {} {}", shell_escape(&from.to_string_lossy())?, shell_escape(&dest.to_string_lossy())?);
-    run_root_cmd(&cmd).map(|_| ())
+    let from_s = from.to_string_lossy();
+    let dest_s = dest.to_string_lossy();
+    pkexec_run("mv", &["--", &from_s, &dest_s]).map(|_| ())
 }
 
 pub fn elevated_create_directory(parent: &Path, name: &str) -> Result<(), String> {
@@ -977,11 +954,12 @@ pub fn elevated_create_directory(parent: &Path, name: &str) -> Result<(), String
         return Err("Invalid directory name".into());
     }
     let dest = parent.join(name);
-    let cmd = format!("mkdir -p {}", shell_escape(&dest.to_string_lossy())?);
-    run_root_cmd(&cmd).map(|_| ())
+    let dest_s = dest.to_string_lossy();
+    pkexec_run("mkdir", &["-p", "--", &dest_s]).map(|_| ())
 }
 
 pub fn eject_drive(device: &str) -> Result<(), String> {
+    validate_device_path(device)?;
     let _ = Command::new("udisksctl")
         .args(["unmount", "-b", device, "--no-user-interaction"])
         .output();
@@ -1158,15 +1136,26 @@ pub fn restore_from_trash(file_name: &str) -> Result<(), String> {
         None
     };
 
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
     let dest = if let Some(ref orig) = original_path {
         PathBuf::from(orig)
     } else {
-        dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp")).join(file_name)
+        home.join(file_name)
     };
 
-    // Reject restoration to sensitive system directories
+    // Validate destination: must be within home, /tmp, or /media (external drives)
     let dest_str = dest.to_string_lossy();
-    for blocked in &["/proc", "/sys", "/dev"] {
+    let home_str = home.to_string_lossy();
+    let allowed = dest_str.starts_with(home_str.as_ref())
+        || dest_str.starts_with("/tmp")
+        || dest_str.starts_with("/media")
+        || dest_str.starts_with("/mnt");
+    if !allowed {
+        return Err(format!("Restore destination {} is outside allowed directories", dest.display()));
+    }
+
+    // Reject sensitive system directories
+    for blocked in &["/proc", "/sys", "/dev", "/etc", "/boot", "/usr/bin", "/usr/sbin"] {
         if dest_str.starts_with(blocked) {
             return Err(format!("Cannot restore to {}", blocked));
         }
@@ -1201,8 +1190,9 @@ pub fn set_permissions(path: &Path, mode: u32) -> Result<(), String> {
 }
 
 pub fn elevated_set_permissions(path: &Path, mode: u32) -> Result<(), String> {
-    let cmd = format!("chmod {:o} {}", mode, shell_escape(&path.to_string_lossy())?);
-    run_root_cmd(&cmd).map(|_| ())
+    let mode_str = format!("{:o}", mode);
+    let path_s = path.to_string_lossy();
+    pkexec_run("chmod", &[&mode_str, "--", &path_s]).map(|_| ())
 }
 
 // ── Symlink creation ──
@@ -1326,6 +1316,18 @@ pub fn find_duplicates(dir: &Path, recursive: bool) -> Result<Vec<DuplicateGroup
 
 fn file_fingerprint(path: &Path, size: u64) -> Result<Vec<u8>, std::io::Error> {
     use std::io::{Read, Seek, SeekFrom};
+
+    const MAX_FINGERPRINT_SIZE: u64 = 100 * 1024 * 1024; // 100MB limit
+    if size > MAX_FINGERPRINT_SIZE {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "File too large for fingerprinting"));
+    }
+
+    // Only fingerprint regular files (not symlinks, FIFOs, /dev/zero, etc.)
+    let meta = fs::symlink_metadata(path)?;
+    if !meta.file_type().is_file() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Not a regular file"));
+    }
+
     let mut f = fs::File::open(path)?;
     let chunk = 4096u64;
 
@@ -1340,4 +1342,104 @@ fn file_fingerprint(path: &Path, size: u64) -> Result<Vec<u8>, std::io::Error> {
     f.seek(SeekFrom::End(-(chunk as i64)))?;
     f.read_exact(&mut buf[chunk as usize..])?;
     Ok(buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_device_path_valid() {
+        assert!(validate_device_path("/dev/sda1").is_ok());
+        assert!(validate_device_path("/dev/nvme0n1p1").is_ok());
+        assert!(validate_device_path("/dev/dm-0").is_ok());
+    }
+
+    #[test]
+    fn test_validate_device_path_rejects_traversal() {
+        assert!(validate_device_path("/dev/../etc/shadow").is_err());
+        assert!(validate_device_path("/dev/sda1\0/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn test_validate_device_path_rejects_non_dev() {
+        assert!(validate_device_path("/etc/passwd").is_err());
+        assert!(validate_device_path("/tmp/fake").is_err());
+        assert!(validate_device_path("sda1").is_err());
+        assert!(validate_device_path("").is_err());
+    }
+
+    #[test]
+    fn test_copy_dir_all_basic() {
+        let tmp = std::env::temp_dir().join("luzumi_test_copy");
+        let src = tmp.join("src");
+        let dst = tmp.join("dst");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("file.txt"), "hello").unwrap();
+        fs::create_dir_all(src.join("sub")).unwrap();
+        fs::write(src.join("sub/nested.txt"), "world").unwrap();
+
+        copy_dir_all(&src, &dst).unwrap();
+
+        assert_eq!(fs::read_to_string(dst.join("file.txt")).unwrap(), "hello");
+        assert_eq!(fs::read_to_string(dst.join("sub/nested.txt")).unwrap(), "world");
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_copy_dir_all_rejects_dangerous_symlinks() {
+        let tmp = std::env::temp_dir().join("luzumi_test_symlink");
+        let src = tmp.join("src");
+        let dst = tmp.join("dst");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&src).unwrap();
+
+        // Create a symlink pointing to an absolute path
+        std::os::unix::fs::symlink("/etc/passwd", src.join("evil")).unwrap();
+        // Create a relative symlink with ..
+        std::os::unix::fs::symlink("../../etc/shadow", src.join("sneaky")).unwrap();
+
+        // copy_dir_all should copy the target content, not recreate dangerous symlinks
+        let result = copy_dir_all(&src, &dst);
+        // It may succeed (copies target) or fail (target doesn't exist as regular file)
+        // but it should NOT create symlinks pointing outside
+        if result.is_ok() {
+            let evil_meta = fs::symlink_metadata(dst.join("evil"));
+            if let Ok(m) = evil_meta {
+                assert!(!m.is_symlink(), "Dangerous absolute symlink should not be recreated");
+            }
+        }
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_trash_filename_validation() {
+        // These should all fail validation in restore_from_trash
+        assert!(restore_from_trash("").is_err());
+        assert!(restore_from_trash("../escape").is_err());
+        assert!(restore_from_trash("foo/bar").is_err());
+        assert!(restore_from_trash("foo\\bar").is_err());
+        assert!(restore_from_trash("..").is_err());
+    }
+
+    #[test]
+    fn test_file_fingerprint_nonexistent() {
+        let result = file_fingerprint(Path::new("/nonexistent/path/12345"), 100);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_file_fingerprint_regular_file() {
+        let tmp = std::env::temp_dir().join("luzumi_test_fp");
+        fs::write(&tmp, "test content").unwrap();
+        let size = fs::metadata(&tmp).unwrap().len();
+        let result = file_fingerprint(&tmp, size);
+        assert!(result.is_ok());
+        let fp = result.unwrap();
+        assert!(!fp.is_empty());
+        let _ = fs::remove_file(&tmp);
+    }
 }

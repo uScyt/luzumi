@@ -367,7 +367,7 @@
   }
 
   .sidebar-item.drop-target {
-    background: rgba(138, 173, 244, 0.2);
+    background: var(--blue-bg);
     color: var(--blue);
   }
 
@@ -450,7 +450,7 @@
   }
 
   .trash-item.active {
-    background: rgba(238, 153, 160, 0.12);
+    background: var(--danger-muted);
     color: var(--maroon);
   }
 

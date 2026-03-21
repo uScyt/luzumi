@@ -3,7 +3,7 @@ mod desktop_apps;
 
 use std::path::Path;
 use std::fs;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 use tauri::menu::{MenuBuilder, MenuItem};
@@ -24,11 +24,18 @@ use filesystem::{
     set_permissions, create_symlink, get_trash_item_info,
 };
 
+static CANCEL_FLAG: AtomicBool = AtomicBool::new(false);
+
 #[derive(Clone, serde::Serialize)]
 struct DeleteProgress {
     current: String,
     done: usize,
     total: usize,
+}
+
+#[tauri::command]
+fn cmd_cancel_operation() {
+    CANCEL_FLAG.store(true, Ordering::Relaxed);
 }
 
 #[tauri::command]
@@ -169,10 +176,15 @@ struct CopyMoveProgress {
 
 #[tauri::command]
 async fn cmd_copy_entries(app: tauri::AppHandle, paths: Vec<String>, dest: String) -> Result<(), String> {
+    CANCEL_FLAG.store(false, Ordering::Relaxed);
     let total = paths.len();
     tauri::async_runtime::spawn_blocking(move || {
         let dest = Path::new(&dest);
         for (i, p) in paths.iter().enumerate() {
+            if CANCEL_FLAG.load(Ordering::Relaxed) {
+                app.emit("copy-move-progress", CopyMoveProgress { done: total, total, current: String::new() }).ok();
+                return Err("Operation cancelled".into());
+            }
             let name = Path::new(p).file_name().unwrap_or_default().to_string_lossy().to_string();
             app.emit("copy-move-progress", CopyMoveProgress { done: i, total, current: name }).ok();
             copy_entry(Path::new(p), dest)?;
@@ -184,10 +196,15 @@ async fn cmd_copy_entries(app: tauri::AppHandle, paths: Vec<String>, dest: Strin
 
 #[tauri::command]
 async fn cmd_move_entries(app: tauri::AppHandle, paths: Vec<String>, dest: String) -> Result<(), String> {
+    CANCEL_FLAG.store(false, Ordering::Relaxed);
     let total = paths.len();
     tauri::async_runtime::spawn_blocking(move || {
         let dest_path = Path::new(&dest);
         for (i, p) in paths.iter().enumerate() {
+            if CANCEL_FLAG.load(Ordering::Relaxed) {
+                app.emit("copy-move-progress", CopyMoveProgress { done: total, total, current: String::new() }).ok();
+                return Err("Operation cancelled".into());
+            }
             let name = Path::new(p).file_name().unwrap_or_default().to_string_lossy().to_string();
             app.emit("copy-move-progress", CopyMoveProgress { done: i, total, current: name }).ok();
             move_entry(Path::new(p), dest_path)?;
@@ -517,6 +534,14 @@ async fn cmd_find_duplicates(path: String, recursive: bool) -> Result<Vec<Duplic
 async fn cmd_read_text_preview(path: String, max_lines: usize) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         use std::io::{BufRead, BufReader};
+        let p = std::path::Path::new(&path);
+        let meta = fs::symlink_metadata(p).map_err(|e| e.to_string())?;
+        if !meta.is_file() {
+            return Err("Not a regular file".into());
+        }
+        if meta.len() > 10 * 1024 * 1024 {
+            return Err("File too large for preview (>10MB)".into());
+        }
         let file = fs::File::open(&path).map_err(|e| e.to_string())?;
         let reader = BufReader::new(file);
         let lines: Vec<String> = reader.lines()
@@ -1081,28 +1106,6 @@ fn cmd_get_git_status(path: String) -> Option<GitStatusInfo> {
     })
 }
 
-#[tauri::command]
-async fn cmd_start_drag(window: tauri::Window, paths: Vec<String>) -> Result<(), String> {
-    let file_paths: Vec<std::path::PathBuf> = paths.iter().map(std::path::PathBuf::from).collect();
-    if file_paths.is_empty() {
-        return Err("No files to drag".into());
-    }
-
-    let gtk_window = window.gtk_window().map_err(|e| format!("Failed to get GTK window: {}", e))?;
-
-    glib::idle_add_local_once(move || {
-        let _ = drag::start_drag(
-            &gtk_window,
-            drag::DragItem::Files(file_paths),
-            drag::Image::Raw(Vec::new()),
-            |_result, _cursor| {},
-            drag::Options::default(),
-        );
-    });
-
-    Ok(())
-}
-
 // ── File watcher ──
 
 struct WatcherState {
@@ -1267,6 +1270,7 @@ pub fn run() {
             cmd_secure_delete_streamed,
             cmd_copy_entries,
             cmd_move_entries,
+            cmd_cancel_operation,
             cmd_get_bookmarks,
             cmd_get_drives,
             cmd_mount_drive,
@@ -1311,7 +1315,6 @@ pub fn run() {
             cmd_list_themes,
             cmd_read_theme,
             cmd_get_themes_dir,
-            cmd_start_drag,
             cmd_compute_checksum,
             cmd_get_disk_space,
             cmd_get_git_status,

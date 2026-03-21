@@ -103,8 +103,8 @@
     width: 36px;
     height: 36px;
     border-radius: 10px;
-    background: rgba(138, 173, 244, 0.1);
-    border: 1px solid rgba(138, 173, 244, 0.18);
+    background: var(--blue-muted);
+    border: 1px solid var(--blue-bg);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -127,7 +127,7 @@
 
   .name-input {
     width: 100%;
-    background: rgba(54, 58, 79, 0.4);
+    background: var(--input-bg-strong);
     border: 1.5px solid var(--border-medium);
     border-radius: 9px;
     padding: 9px 12px;
@@ -140,7 +140,7 @@
 
   .name-input:focus {
     border-color: var(--accent-bg);
-    background: rgba(54, 58, 79, 0.6);
+    background: var(--input-bg-deep);
   }
 
   .actions {

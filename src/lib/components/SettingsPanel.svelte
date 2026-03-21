@@ -204,7 +204,7 @@
 <style>
   .overlay {
     position: fixed;
-    top: 72px;
+    top: calc(var(--titlebar-h) + var(--tabbar-h));
     left: 0;
     right: 0;
     bottom: 0;
@@ -213,7 +213,7 @@
 
   .panel {
     position: fixed;
-    top: 72px;
+    top: calc(var(--titlebar-h) + var(--tabbar-h));
     right: 0;
     bottom: 0;
     width: 264px;
@@ -441,7 +441,7 @@
 
   .toggle.on {
     background: var(--accent-bg);
-    border-color: rgba(198, 160, 246, 0.3);
+    border-color: var(--accent-border);
   }
 
   .toggle-thumb {
@@ -496,7 +496,7 @@
     font-size: 11px;
     padding: 4px 10px;
     border-radius: 6px;
-    background: rgba(198, 160, 246, 0.15);
+    background: var(--accent-glow);
     color: var(--accent);
     transition: background 0.1s;
     white-space: nowrap;
@@ -504,7 +504,7 @@
   }
 
   .set-default-btn:hover:not(:disabled) {
-    background: rgba(198, 160, 246, 0.25);
+    background: var(--accent-btn-hover);
   }
 
   .set-default-btn.is-active,

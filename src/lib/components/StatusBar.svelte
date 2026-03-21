@@ -60,6 +60,11 @@
         </svg>
         <span class="progress-text">{fm.copyMoveProgress.current}</span>
         <span class="progress-count">{fm.copyMoveProgress.done}/{fm.copyMoveProgress.total}</span>
+        <button class="cancel-btn" title={t.cancel} onclick={() => fm.cancelOperation()}>
+          <svg width="8" height="8" viewBox="0 0 16 16" fill="none">
+            <path d="M3 3L13 13M13 3L3 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
       </span>
     {/if}
     {#if clipInfo}
@@ -94,9 +99,9 @@
           <path d="M5 7V9C5 10.1 5.9 11 7 11H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
         {fm.gitStatus.branch}
-        {#if fm.gitStatus.modified.length > 0}<span class="git-mod">+{fm.gitStatus.modified.length}</span>{/if}
-        {#if fm.gitStatus.staged.length > 0}<span class="git-staged">~{fm.gitStatus.staged.length}</span>{/if}
-        {#if fm.gitStatus.untracked.length > 0}<span class="git-untracked">?{fm.gitStatus.untracked.length}</span>{/if}
+        {#if fm.gitStatus.modified.length > 0}<span class="git-mod" title="{fm.gitStatus.modified.length} modified">+{fm.gitStatus.modified.length}</span>{/if}
+        {#if fm.gitStatus.staged.length > 0}<span class="git-staged" title="{fm.gitStatus.staged.length} staged">~{fm.gitStatus.staged.length}</span>{/if}
+        {#if fm.gitStatus.untracked.length > 0}<span class="git-untracked" title="{fm.gitStatus.untracked.length} untracked">?{fm.gitStatus.untracked.length}</span>{/if}
       </span>
     {/if}
     {#if fm.diskSpace}
@@ -199,7 +204,7 @@
     color: var(--blue);
     padding: 1px 7px 1px 3px;
     border-radius: 4px;
-    background: rgba(138, 173, 244, 0.08);
+    background: var(--blue-subtle);
   }
 
   .progress-ring {
@@ -218,13 +223,31 @@
     font-size: 9px;
   }
 
+  .cancel-btn {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--overlay1);
+    transition: background 0.1s, color 0.1s;
+    flex-shrink: 0;
+    margin-left: 2px;
+  }
+
+  .cancel-btn:hover {
+    background: var(--danger-bg);
+    color: var(--red);
+  }
+
   .clip-badge {
     font-size: 9px;
     font-weight: 600;
     letter-spacing: 0.04em;
     padding: 1px 7px 1px 5px;
     border-radius: 4px;
-    background: rgba(138, 173, 244, 0.1);
+    background: var(--blue-muted);
     color: var(--blue);
     display: flex;
     align-items: center;
@@ -266,7 +289,7 @@
     font-weight: 600;
     padding: 1px 7px 1px 5px;
     border-radius: 4px;
-    background: rgba(166, 218, 149, 0.1);
+    background: var(--success-subtle);
     color: var(--green);
     display: flex;
     align-items: center;
@@ -295,10 +318,10 @@
 
   .zoom-slider {
     width: 64px;
-    height: 4px;
+    height: 6px;
     appearance: none;
     background: var(--surface1);
-    border-radius: 2px;
+    border-radius: 3px;
     outline: none;
     cursor: pointer;
     margin-right: 6px;
@@ -306,11 +329,28 @@
 
   .zoom-slider::-webkit-slider-thumb {
     appearance: none;
-    width: 10px;
-    height: 10px;
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
     background: var(--accent);
     cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  }
+
+  .zoom-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  }
+
+  .zoom-slider::-moz-range-track {
+    height: 6px;
+    background: var(--surface1);
+    border-radius: 3px;
   }
 
   .right {

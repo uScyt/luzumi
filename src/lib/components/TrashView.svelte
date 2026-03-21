@@ -135,7 +135,7 @@
     justify-content: space-between;
     padding: 10px 16px;
     border-bottom: 1px solid var(--border-subtle);
-    background: rgba(24, 25, 38, 0.4);
+    background: var(--panel-bg-strong);
     backdrop-filter: blur(12px);
     flex-shrink: 0;
     gap: 12px;
@@ -152,8 +152,8 @@
     width: 30px;
     height: 30px;
     border-radius: 9px;
-    background: rgba(237, 135, 150, 0.12);
-    border: 1px solid rgba(237, 135, 150, 0.18);
+    background: var(--danger-muted);
+    border: 1px solid var(--danger-border);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -184,8 +184,8 @@
     font-size: 11px;
     font-weight: 500;
     color: var(--maroon);
-    background: rgba(237, 135, 150, 0.1);
-    border: 1px solid rgba(237, 135, 150, 0.14);
+    background: var(--danger-muted);
+    border: 1px solid var(--danger-border);
     padding: 2px 9px;
     border-radius: 10px;
     white-space: nowrap;
@@ -208,16 +208,16 @@
     font-size: 12px;
     font-weight: 600;
     color: var(--red);
-    background: rgba(237, 135, 150, 0.1);
-    border: 1px solid rgba(237, 135, 150, 0.18);
+    background: var(--danger-muted);
+    border: 1px solid var(--danger-border);
     transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
     white-space: nowrap;
   }
 
   .btn-empty:hover:not(:disabled) {
-    background: rgba(237, 135, 150, 0.18);
-    border-color: rgba(237, 135, 150, 0.3);
-    box-shadow: 0 0 0 3px rgba(237, 135, 150, 0.06);
+    background: var(--danger-border);
+    border-color: var(--danger-border-strong);
+    box-shadow: 0 0 0 3px var(--danger-subtle);
   }
 
   .btn-empty:disabled {

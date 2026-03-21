@@ -130,7 +130,7 @@
 
   .name-input {
     width: 100%;
-    background: rgba(54, 58, 79, 0.4);
+    background: var(--input-bg-strong);
     border: 1.5px solid var(--border-medium);
     border-radius: 9px;
     padding: 9px 12px;
@@ -143,7 +143,7 @@
 
   .name-input:focus {
     border-color: var(--accent-bg);
-    background: rgba(54, 58, 79, 0.6);
+    background: var(--input-bg-deep);
   }
 
   .actions {

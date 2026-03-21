@@ -254,7 +254,7 @@
     height: 100%;
     padding: 0 12px;
     border-radius: 8px;
-    background: rgba(54, 58, 79, 0.3);
+    background: var(--input-bg);
     border: 1px solid var(--border-subtle);
     backdrop-filter: blur(6px);
     overflow: hidden;
@@ -263,7 +263,7 @@
   }
 
   .breadcrumb:hover {
-    background: rgba(54, 58, 79, 0.5);
+    background: var(--input-bg-focus);
     border-color: var(--border-medium);
   }
 
@@ -297,15 +297,15 @@
   }
 
   .crumb.drop-target {
-    background: rgba(138, 173, 244, 0.25);
+    background: var(--blue-bg-strong);
     color: var(--blue);
-    box-shadow: 0 0 0 1px rgba(138, 173, 244, 0.4);
+    box-shadow: 0 0 0 1px var(--blue-border-strong);
   }
 
   .path-input {
     width: 100%;
     height: 100%;
-    background: rgba(54, 58, 79, 0.5);
+    background: var(--input-bg-focus);
     border: 1.5px solid var(--mauve);
     border-radius: 8px;
     padding: 0 12px;
@@ -342,7 +342,7 @@
   .search-input {
     width: 180px;
     height: 32px;
-    background: rgba(54, 58, 79, 0.3);
+    background: var(--input-bg);
     border: 1px solid var(--border-subtle);
     border-radius: 8px;
     padding: 0 10px 0 32px;
@@ -359,7 +359,7 @@
 
   .search-input:focus {
     border-color: var(--accent-bg);
-    background: rgba(54, 58, 79, 0.5);
+    background: var(--input-bg-focus);
     width: 220px;
   }
 

@@ -245,7 +245,7 @@
 
   .field-input {
     width: 100%;
-    background: rgba(54, 58, 79, 0.4);
+    background: var(--input-bg-strong);
     border: 1.5px solid var(--border-medium);
     border-radius: 8px;
     padding: 7px 10px;

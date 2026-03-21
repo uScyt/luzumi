@@ -151,8 +151,8 @@
     width: 36px;
     height: 36px;
     border-radius: 10px;
-    background: rgba(138, 173, 244, 0.1);
-    border: 1px solid rgba(138, 173, 244, 0.18);
+    background: var(--blue-muted);
+    border: 1px solid var(--blue-bg);
     display: flex;
     align-items: center;
     justify-content: center;

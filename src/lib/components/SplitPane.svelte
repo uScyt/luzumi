@@ -128,7 +128,7 @@
     align-items: center;
     gap: 6px;
     padding: 6px 10px;
-    background: rgba(24, 25, 38, 0.35);
+    background: var(--panel-bg);
     backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;

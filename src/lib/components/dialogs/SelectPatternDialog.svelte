@@ -110,7 +110,7 @@
 
   .field-input {
     width: 100%;
-    background: rgba(54, 58, 79, 0.4);
+    background: var(--input-bg-strong);
     border: 1.5px solid var(--border-medium);
     border-radius: 8px;
     padding: 9px 12px;
@@ -121,7 +121,7 @@
     box-sizing: border-box;
   }
 
-  .field-input:focus { border-color: rgba(166, 218, 149, 0.55); }
+  .field-input:focus { border-color: var(--success-border); }
 
   .actions {
     display: flex;

@@ -396,7 +396,7 @@
     align-items: flex-start;
     padding: 20px 20px 16px;
     border-bottom: 1px solid var(--border-light);
-    background: rgba(24, 25, 38, 0.4);
+    background: var(--panel-bg-strong);
   }
 
   .header-preview {
@@ -414,7 +414,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(54, 58, 79, 0.5);
+    background: var(--input-bg-focus);
     flex-shrink: 0;
     overflow: hidden;
   }
@@ -469,7 +469,7 @@
     gap: 0;
     padding: 0 20px;
     border-bottom: 1px solid var(--border-light);
-    background: rgba(24, 25, 38, 0.25);
+    background: var(--panel-bg-muted);
   }
 
   .tab {
@@ -594,7 +594,7 @@
     font-size: 13px;
     padding: 5px 0;
     border-radius: 6px;
-    background: rgba(54, 58, 79, 0.3);
+    background: var(--input-bg);
     color: var(--overlay0);
     font-weight: 600;
   }
@@ -615,12 +615,12 @@
     font-weight: 600;
     padding: 3px 10px;
     border-radius: 20px;
-    background: rgba(54, 58, 79, 0.4);
+    background: var(--input-bg-strong);
     color: var(--subtext0);
   }
 
   .attr-badge.readonly {
-    background: rgba(238, 153, 160, 0.12);
+    background: var(--danger-muted);
     color: var(--maroon);
   }
 
@@ -680,7 +680,7 @@
     font-family: monospace;
     font-size: 11px;
     color: var(--subtext0);
-    background: rgba(54, 58, 79, 0.3);
+    background: var(--input-bg);
     padding: 6px 10px;
     border-radius: 6px;
     word-break: break-all;
@@ -749,7 +749,7 @@
     font-size: 22px;
     font-weight: 700;
     color: var(--mauve);
-    background: rgba(54, 58, 79, 0.3);
+    background: var(--input-bg);
     border: 1px solid var(--border-medium);
     border-radius: 6px;
     padding: 4px 10px;
@@ -806,7 +806,7 @@
     font-size: 12px;
     margin-top: 6px;
     padding: 6px 10px;
-    background: rgba(237, 135, 150, 0.08);
+    background: var(--danger-subtle);
     border-radius: 6px;
   }
 </style>

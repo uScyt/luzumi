@@ -444,6 +444,16 @@ class FileManager {
       this.checkPortalInstalled();
       this.loadThemeList();
       if (this.currentTheme !== "Default") this.applyTheme(this.currentTheme);
+      // Listen for native file drops from external apps
+      listen<{ paths: string[]; position: { x: number; y: number } }>(
+        "tauri://drag-drop",
+        (event) => {
+          const { paths } = event.payload;
+          if (paths.length > 0) {
+            this.handleExternalDrop(paths, this.currentPath);
+          }
+        }
+      );
     } catch (e) {
       this.error = String(e);
     }
@@ -877,11 +887,19 @@ class FileManager {
     }
   }
 
-  async startNativeDrag(entry: FileEntry) {
-    const paths = this.selected.has(entry.path) ? [...this.selected] : [entry.path];
+  async cancelOperation() {
     try {
-      await invoke("cmd_start_drag", { paths });
+      await invoke("cmd_cancel_operation");
+      this.setStatus(t.cancelled);
     } catch (_) {}
+  }
+
+  handleExternalDrop(sourcePaths: string[], dest: string) {
+    // Filter out paths already in the destination
+    const filtered = sourcePaths.filter(p => parentDir(p) !== dest);
+    if (filtered.length === 0) return;
+    this.dragPaths = filtered;
+    this.requestDrop(dest);
   }
 
   async refreshDiskSpace(path: string) {

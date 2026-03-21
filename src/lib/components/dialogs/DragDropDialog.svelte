@@ -133,8 +133,8 @@
   }
 
   .folder-chip.blue {
-    background: rgba(138, 173, 244, 0.12);
-    border: 1px solid rgba(138, 173, 244, 0.2);
+    background: var(--blue-muted);
+    border: 1px solid var(--blue-bg);
     color: var(--blue);
   }
 
