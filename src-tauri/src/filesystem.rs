@@ -728,9 +728,8 @@ pub fn read_thumbnail(path: &Path) -> Result<String, String> {
 
 fn read_video_thumbnail(path: &Path) -> Result<String, String> {
     use std::process::Command;
-    use std::time::Duration;
 
-    let mut child = Command::new("ffmpeg")
+    let output = Command::new("ffmpeg")
         .args([
             "-ss", "1",
             "-i", &path.to_string_lossy(),
@@ -741,29 +740,9 @@ fn read_video_thumbnail(path: &Path) -> Result<String, String> {
             "-",
         ])
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
+        .stderr(std::process::Stdio::null())
+        .output()
         .map_err(|e| format!("ffmpeg not found: {}", e))?;
-
-    // Timeout: kill ffmpeg if it takes more than 5 seconds
-    let timeout = Duration::from_secs(5);
-    let start = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(_status)) => break,
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err("ffmpeg timeout".to_string());
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(e) => return Err(format!("ffmpeg error: {}", e)),
-        }
-    }
-
-    let output = child.wait_with_output().map_err(|e| format!("ffmpeg error: {}", e))?;
 
     if !output.status.success() || output.stdout.is_empty() {
         return Err("Failed to extract video thumbnail".to_string());
