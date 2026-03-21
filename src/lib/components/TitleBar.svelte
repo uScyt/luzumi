@@ -114,7 +114,7 @@
     justify-content: space-between;
     background: var(--app-bg);
     border-radius: 14px 14px 0 0;
-    height: 38px;
+    height: var(--titlebar-h);
     padding: 0 6px 0 14px;
     user-select: none;
     -webkit-user-select: none;

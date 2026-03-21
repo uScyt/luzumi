@@ -63,7 +63,7 @@
     align-items: stretch;
     background: var(--app-bg);
     border-bottom: 1px solid var(--border-subtle);
-    height: 34px;
+    height: var(--tabbar-h);
     overflow: hidden;
     user-select: none;
     -webkit-user-select: none;
@@ -84,7 +84,7 @@
     padding: 0 26px 0 9px;
     flex: 1;
     min-width: 0;
-    height: 34px;
+    height: var(--tabbar-h);
     border-right: 1px solid var(--border-subtle);
     color: var(--overlay1);
     font-size: 13px;
@@ -165,7 +165,7 @@
   .new-tab-btn {
     flex-shrink: 0;
     width: 36px;
-    height: 34px;
+    height: var(--tabbar-h);
     display: flex;
     align-items: center;
     justify-content: center;

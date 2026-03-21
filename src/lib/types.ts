@@ -9,6 +9,7 @@ export interface FileEntry {
   isWritable: boolean;
   permissionsMode: number | null;
   isBrokenLink: boolean;
+  isVault: boolean;
 }
 
 export interface BookmarkEntry {
@@ -88,6 +89,7 @@ export function getParent(path: string): string {
 }
 
 export function getFileIcon(entry: FileEntry): string {
+  if (entry.isVault) return "Vault";
   if (entry.kind === "directory") return "Folder";
   if (entry.kind === "symlink") return "Link";
   if (entry.kind === "other") return "File";
@@ -520,6 +522,7 @@ export function getFileIcon(entry: FileEntry): string {
 }
 
 export function getFileColor(entry: FileEntry): string {
+  if (entry.isVault) return "#ffb432";
   if (entry.kind === "directory") return "var(--blue)";
   if (entry.kind === "symlink") return "var(--teal)";
 

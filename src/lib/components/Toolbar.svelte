@@ -162,6 +162,21 @@
         <span class="search-count">{found}/{total}{#if global > 0} +{global}{/if}</span>
       {/if}
     </div>
+    <select
+      class="type-filter"
+      value={fm.typeFilter ?? ""}
+      onchange={(e) => { fm.typeFilter = (e.target as HTMLSelectElement).value || null; }}
+      title="Filter by type"
+    >
+      <option value="">All</option>
+      <option value="directory">Folders</option>
+      <option value="image">Images</option>
+      <option value="video">Videos</option>
+      <option value="audio">Audio</option>
+      <option value="document">Documents</option>
+      <option value="code">Code</option>
+      <option value="archive">Archives</option>
+    </select>
     <button
       class="tool-btn"
       class:active={fm.showPreview}
@@ -201,7 +216,7 @@
     gap: 6px;
     padding: 0 12px;
     background: var(--app-bg);
-    height: 50px;
+    height: var(--toolbar-h);
   }
 
   .nav-buttons {
@@ -329,6 +344,41 @@
     position: relative;
     display: flex;
     align-items: center;
+  }
+
+  .type-filter {
+    appearance: none;
+    -webkit-appearance: none;
+    background: var(--input-bg);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    color: var(--subtext0);
+    font-size: 12px;
+    padding: 6px 24px 6px 8px;
+    cursor: pointer;
+    outline: none;
+    height: 32px;
+    background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%238087a2' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+  }
+
+  .type-filter:hover {
+    background: var(--input-bg-focus);
+    border-color: var(--border-medium);
+    color: var(--text);
+  }
+
+  .type-filter:focus {
+    border-color: var(--accent-bg);
+    background: var(--input-bg-focus);
+  }
+
+  .type-filter option {
+    background: var(--surface0, #363a4f);
+    color: var(--text);
+    padding: 6px 8px;
   }
 
   .search-icon {

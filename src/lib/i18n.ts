@@ -98,6 +98,14 @@ const en = {
   moveToTrash: "Move to Trash",
   deletePermanently: "Delete Permanently",
   properties: "Properties",
+  openInNewTab: "Open in New Tab",
+  moreActions: "More Actions",
+  selectAll: "Select All",
+  pasteAsSymlink: "Paste as Symlink",
+  sortByLabel: "Sort By",
+  ascending: "Ascending",
+  descending: "Descending",
+  createSymlink: "Create Symlink",
 
   // Empty trash dialog
   emptyTrash: "Empty Trash",
@@ -253,6 +261,39 @@ const en = {
   archiveCreated: (name: string) => `Archive ${name} created`,
   archiveExtracted: (name: string) => `${name} extracted`,
 
+  // Vault
+  createVault: "Create vault",
+  unlockVault: "Unlock vault",
+  lockVault: "Lock vault",
+  changeVaultPassword: "Change vault password",
+  vaultPassword: "Vault password",
+  vaultDummyPassword: "Dummy password (optional)",
+  vaultDummyHint: "A decoy password that shows fake content",
+  vaultConfirmPassword: "Confirm password",
+  vaultCreating: "Creating vault...",
+  vaultUnlocking: "Unlocking...",
+  vaultLocking: "Locking...",
+  vaultCreated: "Vault created",
+  vaultUnlocked: "Vault unlocked",
+  vaultLocked: "Vault locked",
+  vaultWrongPassword: "Wrong password",
+  vaultPasswordMismatch: "Passwords do not match",
+  vaultPasswordTooShort: "Password must be at least 4 characters",
+  vaultPasswordChanged: "Password changed",
+  oldPassword: "Old password",
+  newPassword: "New password",
+  confirmNewPassword: "Confirm new password",
+
+  // Desktop Menu (KDE integration)
+  appName: "Luzumi",
+  openLuzumi: "Open Luzumi",
+  desktopActions: "Desktop",
+  lockScreen: "Lock Screen",
+  showLogoutScreen: "Show Logout Screen",
+  wallpaperSettings: "Wallpaper & Desktop Settings",
+  displayConfiguration: "Display Configuration",
+  extensions: "Extensions",
+
   // Progress
   copying: "Copying...",
   moving: "Moving...",
@@ -268,6 +309,27 @@ const en = {
   uninstallPortal: "Remove system file picker",
   portalInstalled: "Active",
   portalNotInstalled: "Not installed",
+
+  // Settings panel
+  appearance: "Appearance",
+  lineHeight: "Line Height",
+  options: "Options",
+  animations: "Animations",
+  highContrast: "High Contrast",
+  fontSize: "Font Size",
+  density: "Density",
+  comfortable: "Comfortable",
+  compact: "Compact",
+  dense: "Dense",
+
+  // Integrity check
+  integrity: "Integrity",
+  integrityCheck: "Installation Check",
+  integrityCheckBtn: "Check",
+  integrityRepairBtn: "Check & Repair",
+  integrityChecking: "Checking...",
+  integrityAllOk: "Everything is properly installed",
+  integrityIssues: (n: number) => `${n} issue${n !== 1 ? "s" : ""} found`,
 };
 
 const fr: typeof en = {
@@ -368,6 +430,14 @@ const fr: typeof en = {
   moveToTrash: "Déplacer dans la corbeille",
   deletePermanently: "Supprimer définitivement",
   properties: "Propriétés",
+  openInNewTab: "Ouvrir dans un nouvel onglet",
+  moreActions: "Autres actions",
+  selectAll: "Tout sélectionner",
+  pasteAsSymlink: "Coller comme lien symbolique",
+  sortByLabel: "Trier par",
+  ascending: "Croissant",
+  descending: "Décroissant",
+  createSymlink: "Créer un lien symbolique",
 
   // Empty trash dialog
   emptyTrash: "Vider la corbeille",
@@ -523,6 +593,39 @@ const fr: typeof en = {
   archiveCreated: (name: string) => `Archive ${name} créée`,
   archiveExtracted: (name: string) => `${name} extrait`,
 
+  // Vault
+  createVault: "Créer un coffre-fort",
+  unlockVault: "Déverrouiller le coffre-fort",
+  lockVault: "Verrouiller le coffre-fort",
+  changeVaultPassword: "Changer le mot de passe",
+  vaultPassword: "Mot de passe du coffre-fort",
+  vaultDummyPassword: "Mot de passe leurre (optionnel)",
+  vaultDummyHint: "Un mot de passe leurre qui affiche un faux contenu",
+  vaultConfirmPassword: "Confirmer le mot de passe",
+  vaultCreating: "Création du coffre-fort...",
+  vaultUnlocking: "Déverrouillage...",
+  vaultLocking: "Verrouillage...",
+  vaultCreated: "Coffre-fort créé",
+  vaultUnlocked: "Coffre-fort déverrouillé",
+  vaultLocked: "Coffre-fort verrouillé",
+  vaultWrongPassword: "Mot de passe incorrect",
+  vaultPasswordMismatch: "Les mots de passe ne correspondent pas",
+  vaultPasswordTooShort: "Le mot de passe doit faire au moins 4 caractères",
+  vaultPasswordChanged: "Mot de passe changé",
+  oldPassword: "Ancien mot de passe",
+  newPassword: "Nouveau mot de passe",
+  confirmNewPassword: "Confirmer le nouveau mot de passe",
+
+  // Desktop Menu (intégration KDE)
+  appName: "Luzumi",
+  openLuzumi: "Ouvrir Luzumi",
+  desktopActions: "Bureau",
+  lockScreen: "Verrouiller l'écran",
+  showLogoutScreen: "Afficher l'écran de déconnexion",
+  wallpaperSettings: "Fond d'écran et paramètres du bureau",
+  displayConfiguration: "Configuration de l'affichage",
+  extensions: "Extensions",
+
   // Progress
   copying: "Copie en cours...",
   moving: "Déplacement en cours...",
@@ -538,6 +641,27 @@ const fr: typeof en = {
   uninstallPortal: "Retirer le sélecteur système",
   portalInstalled: "Actif",
   portalNotInstalled: "Non installé",
+
+  // Settings panel
+  appearance: "Apparence",
+  lineHeight: "Hauteur de ligne",
+  options: "Options",
+  animations: "Animations",
+  highContrast: "Contraste élevé",
+  fontSize: "Taille de police",
+  density: "Densité",
+  comfortable: "Confortable",
+  compact: "Compact",
+  dense: "Dense",
+
+  // Integrity check
+  integrity: "Intégrité",
+  integrityCheck: "Vérification de l'installation",
+  integrityCheckBtn: "Vérifier",
+  integrityRepairBtn: "Vérifier et réparer",
+  integrityChecking: "Vérification...",
+  integrityAllOk: "Tout est correctement installé",
+  integrityIssues: (n: number) => `${n} problème${n !== 1 ? "s" : ""} détecté${n !== 1 ? "s" : ""}`,
 };
 
 export const t = lang === 'fr' ? fr : en;

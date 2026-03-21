@@ -62,7 +62,7 @@ The core colors used across the entire UI. Icons, text, badges, and states all d
 | `--subtext0` | `#a5adce` | Tertiary text |
 | `--overlay2` | `#939ab7` | Muted text, generic file icons |
 | `--overlay1` | `#8087a2` | Disabled text, config/lock/log icons |
-| `--overlay0` | `#6e738d` | Placeholder text |
+| `--overlay0` | `#8087a2` | Placeholder text (WCAG 3:1 minimum contrast) |
 
 ### Surfaces
 
@@ -266,3 +266,4 @@ Icons use `currentColor` and inherit from the palette via `getFileColor()`. Chan
 - **Light themes** — Remember to also override `--app-bg`, `--glass-*`, `--hover-*`, `--border-*`, `--shadow-*`, and `--scrollbar-*` with lighter values
 - **Accent color** — Change `--accent` to restyle buttons, selections, and active states across the entire UI
 - **Reload** — Click the reload button in Settings after modifying a theme file
+- **Animations** — All transitions respect `prefers-reduced-motion`. Users can also disable animations entirely in Settings

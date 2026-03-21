@@ -353,6 +353,31 @@ impl FileManagerBackend {
     }
 }
 
+/// Desktop context menu backend — called by the KDE Plasma ContainmentAction plugin
+/// to show Luzumi's desktop context menu at a given screen position.
+struct DesktopMenuBackend;
+
+#[interface(name = "com.luzumi.DesktopMenu")]
+impl DesktopMenuBackend {
+    async fn show(&self, x: i32, y: i32) {
+        eprintln!("luzumi-portal: DesktopMenu.Show({}, {})", x, y);
+        // Kill any existing desktop-menu instance to avoid duplicates
+        let _ = Command::new("pkill")
+            .args(["-f", "luzumi --desktop-menu"])
+            .status()
+            .await;
+        if let Ok(luzumi) = find_luzumi() {
+            let _ = Command::new(&luzumi)
+                .args([
+                    "--desktop-menu",
+                    &format!("--menu-x={}", x),
+                    &format!("--menu-y={}", y),
+                ])
+                .spawn();
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let daemon_mode = std::env::args().any(|a| a == "--daemon");
@@ -362,10 +387,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .name("org.freedesktop.FileManager1")?
         .serve_at("/org/freedesktop/portal/desktop", FileChooserBackend)?
         .serve_at("/org/freedesktop/FileManager1", FileManagerBackend)?
+        .serve_at("/com/luzumi/DesktopMenu", DesktopMenuBackend)?
         .build()
         .await?;
 
-    eprintln!("luzumi-portal: D-Bus service started (FileChooser + FileManager1)");
+    eprintln!("luzumi-portal: D-Bus service started (FileChooser + FileManager1 + DesktopMenu)");
 
     if daemon_mode {
         // In daemon mode, also run the file indexer for fast search

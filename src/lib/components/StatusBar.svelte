@@ -10,7 +10,7 @@
   );
 </script>
 
-<footer class="statusbar">
+<footer class="statusbar" role="status" aria-live="polite">
   <div class="left">
     {#if fm.showTrashView}
       <span class="status-text">
@@ -156,7 +156,7 @@
     padding: 0 14px;
     background: var(--app-bg);
     border-top: 1px solid var(--border-subtle);
-    height: 28px;
+    height: var(--statusbar-h);
     flex-shrink: 0;
   }
 

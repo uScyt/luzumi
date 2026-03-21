@@ -46,6 +46,7 @@ pub struct FileEntry {
     pub is_writable: bool,
     pub permissions_mode: Option<u32>,
     pub is_broken_link: bool,
+    pub is_vault: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +133,8 @@ impl FileEntry {
             false
         };
 
+        let is_vault = extension.as_deref() == Some("luzumi-vault") && kind == "file";
+
         Some(FileEntry {
             name,
             path: path.to_string_lossy().to_string(),
@@ -143,6 +146,7 @@ impl FileEntry {
             is_writable,
             permissions_mode,
             is_broken_link,
+            is_vault,
         })
     }
 }
@@ -223,6 +227,9 @@ pub fn elevated_read_directory(path: &Path, show_hidden: bool) -> Result<Vec<Fil
                 None
             };
 
+            let ext_str = extension.as_ref().map(|s| s.to_string());
+            let is_vault = ext_str.as_deref() == Some("luzumi-vault") && kind == "file";
+
             Some(FileEntry {
                 name,
                 path: full_path.to_string_lossy().to_string(),
@@ -230,10 +237,11 @@ pub fn elevated_read_directory(path: &Path, show_hidden: bool) -> Result<Vec<Fil
                 size: if kind == "file" || kind == "symlink" { Some(size) } else { None },
                 modified: Some(mtime as i64),
                 is_hidden,
-                extension: extension.map(|s| s.to_string()),
+                extension: ext_str,
                 is_writable: true, // elevated = root, always writable
                 permissions_mode: None,
                 is_broken_link: false,
+                is_vault,
             })
         })
         .collect();
@@ -262,8 +270,11 @@ pub fn rename_entry(from: &Path, new_name: &str) -> Result<(), String> {
     if new_name.contains('/') || new_name.contains('\0') {
         return Err("Invalid file name".into());
     }
+    if !from.exists() {
+        return Err(format!("Source does not exist: {}", from.display()));
+    }
     let parent = from.parent().ok_or("Cannot rename root")?;
-    fs::rename(from, parent.join(new_name)).map_err(|e| e.to_string())
+    fs::rename(from, parent.join(new_name)).map_err(|e| format!("{}: {} -> {}", e, from.display(), parent.join(new_name).display()))
 }
 
 pub fn delete_entries(paths: &[&Path]) -> Result<(), String> {
@@ -350,14 +361,14 @@ fn secure_delete_file(path: &Path) -> Result<(), String> {
         }
 
         use std::io::Seek;
+        use rand::RngCore;
         file.seek(std::io::SeekFrom::Start(0)).map_err(|e| e.to_string())?;
         let mut rng_written = 0u64;
+        let mut random_buf = vec![0u8; chunk_size];
         while rng_written < size {
             let chunk = chunk_size.min((size - rng_written) as usize);
-            let random_buf: Vec<u8> = (0..chunk).map(|i| {
-                ((i as u64 ^ rng_written ^ 0xDEADBEEF) & 0xFF) as u8
-            }).collect();
-            file.write_all(&random_buf).map_err(|e| e.to_string())?;
+            rand::thread_rng().fill_bytes(&mut random_buf[..chunk]);
+            file.write_all(&random_buf[..chunk]).map_err(|e| e.to_string())?;
             rng_written += chunk as u64;
         }
         file.sync_all().map_err(|e| e.to_string())?;

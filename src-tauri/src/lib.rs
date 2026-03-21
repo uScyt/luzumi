@@ -1,5 +1,14 @@
 mod filesystem;
 mod desktop_apps;
+mod errors;
+mod search;
+mod preview;
+mod tags;
+mod compare;
+mod logging;
+mod operation_queue;
+mod plugins;
+mod vault;
 
 use std::path::Path;
 use std::fs;
@@ -54,6 +63,33 @@ async fn cmd_elevated_list_directory(path: String, show_hidden: bool) -> Result<
 
 #[tauri::command]
 fn open_file(path: String) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return Err(format!("File not found: {}", path));
+    }
+    // Check if the file is a native executable (not a .desktop file or script handled by xdg-open)
+    if let Ok(meta) = p.metadata() {
+        let mode = meta.permissions().mode();
+        let is_executable = mode & 0o111 != 0;
+        let is_regular = meta.is_file();
+        if is_executable && is_regular {
+            // Check if it's a binary (not a text file that xdg-open should handle)
+            let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+            let text_exts = ["sh", "bash", "zsh", "py", "pl", "rb", "js", "ts", "lua",
+                             "desktop", "txt", "md", "html", "css", "json", "xml", "yaml", "yml",
+                             "toml", "ini", "cfg", "conf", "log", "csv"];
+            if !text_exts.contains(&ext) {
+                // Launch the executable directly
+                std::process::Command::new(&path)
+                    .current_dir(p.parent().unwrap_or(std::path::Path::new("/")))
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+                return Ok(());
+            }
+        }
+    }
+    // For everything else, use xdg-open
     open::that(&path).map_err(|e| e.to_string())
 }
 
@@ -65,6 +101,62 @@ fn cmd_list_open_with_apps(path: String) -> Vec<desktop_apps::AppInfo> {
 #[tauri::command]
 fn cmd_open_with_app(path: String, desktop_id: String) -> Result<(), String> {
     desktop_apps::open_with_app(&path, &desktop_id)
+}
+
+#[tauri::command]
+fn cmd_open_with_command(path: String, command: String) -> Result<(), String> {
+    use std::process::Command;
+    // Validate: command must be a simple executable name (no shell metacharacters)
+    let cmd_trimmed = command.trim();
+    if cmd_trimmed.is_empty() {
+        return Err("Command cannot be empty".into());
+    }
+    // Block shell metacharacters to prevent injection
+    const BLOCKED: &[char] = &[';', '|', '&', '$', '`', '(', ')', '{', '}', '<', '>', '\n', '\r', '\\', '\'', '"', '!', '#'];
+    if cmd_trimmed.chars().any(|c| BLOCKED.contains(&c)) {
+        return Err("Command contains invalid characters".into());
+    }
+    // Validate the path exists
+    if !std::path::Path::new(&path).exists() {
+        return Err(format!("File not found: {}", path));
+    }
+    // Split command into program + args safely (no shell involved)
+    let parts: Vec<&str> = cmd_trimmed.split_whitespace().collect();
+    let program = parts[0];
+    let mut cmd = Command::new(program);
+    for arg in &parts[1..] {
+        cmd.arg(arg);
+    }
+    cmd.arg(&path);
+    cmd.spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn cmd_set_default_app(mime_type: String, desktop_id: String) -> Result<(), String> {
+    use std::process::Command;
+    // Validate inputs to prevent argument injection
+    if mime_type.is_empty() || desktop_id.is_empty() {
+        return Err("mime_type and desktop_id are required".into());
+    }
+    // desktop_id must look like "app.desktop"
+    if !desktop_id.ends_with(".desktop") || desktop_id.contains('/') || desktop_id.contains('\0') {
+        return Err("Invalid desktop_id format".into());
+    }
+    // mime_type must look like "type/subtype"
+    if !mime_type.contains('/') || mime_type.contains('\0') || mime_type.contains(' ') {
+        return Err("Invalid mime_type format".into());
+    }
+    let output = Command::new("xdg-mime")
+        .arg("default")
+        .arg(&desktop_id)
+        .arg(&mime_type)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -99,6 +191,7 @@ fn cmd_search_index(query: String, limit: Option<usize>) -> Result<Vec<FileEntry
         let modified: Option<i64> = row.get(4)?;
         let extension: Option<String> = row.get(5)?;
 
+        let is_vault = extension.as_deref() == Some("luzumi-vault") && kind == "file";
         Ok(FileEntry {
             name: name.clone(),
             path,
@@ -110,6 +203,7 @@ fn cmd_search_index(query: String, limit: Option<usize>) -> Result<Vec<FileEntry
             is_writable: true,
             permissions_mode: None,
             is_broken_link: false,
+            is_vault,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -733,6 +827,124 @@ fn cmd_cancel_picker(
     Ok(())
 }
 
+// ── Desktop Menu mode ──
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct DesktopMenuConfig {
+    x: i32,
+    y: i32,
+}
+
+fn parse_desktop_menu_args() -> Option<DesktopMenuConfig> {
+    let args: Vec<String> = std::env::args().collect();
+    if !args.iter().any(|a| a == "--desktop-menu") {
+        return None;
+    }
+    let get_val = |prefix: &str| -> Option<String> {
+        args.iter().find_map(|a| a.strip_prefix(prefix).map(|s| s.to_string()))
+    };
+    let x = get_val("--menu-x=").and_then(|s| s.parse().ok()).unwrap_or(0);
+    let y = get_val("--menu-y=").and_then(|s| s.parse().ok()).unwrap_or(0);
+    Some(DesktopMenuConfig { x, y })
+}
+
+#[tauri::command]
+fn cmd_get_desktop_menu_config(state: tauri::State<'_, Mutex<Option<DesktopMenuConfig>>>) -> Result<Option<DesktopMenuConfig>, String> {
+    Ok(state.lock().map_err(|e| format!("Lock error: {}", e))?.clone())
+}
+
+#[tauri::command]
+async fn cmd_desktop_action(action: String) -> Result<(), String> {
+    match action.as_str() {
+        "lock-screen" => {
+            std::process::Command::new("dbus-send")
+                .args(["--session", "--dest=org.freedesktop.ScreenSaver",
+                       "--type=method_call", "/ScreenSaver",
+                       "org.freedesktop.ScreenSaver.Lock"])
+                .spawn().map_err(|e| e.to_string())?;
+        }
+        "logout" => {
+            std::process::Command::new("dbus-send")
+                .args(["--session", "--dest=org.kde.Shutdown",
+                       "--type=method_call", "/Shutdown",
+                       "org.kde.Shutdown.logout",
+                       "int32:0", "int32:0", "int32:0"])
+                .spawn().map_err(|e| e.to_string())?;
+        }
+        "wallpaper-settings" => {
+            std::process::Command::new("plasma-open-settings")
+                .arg("kcm_wallpaper")
+                .spawn()
+                .or_else(|_| {
+                    std::process::Command::new("kcmshell6")
+                        .arg("kcm_lookandfeel")
+                        .spawn()
+                })
+                .map_err(|e| e.to_string())?;
+        }
+        "display-config" => {
+            std::process::Command::new("plasma-open-settings")
+                .arg("kcm_kscreen")
+                .spawn()
+                .or_else(|_| {
+                    std::process::Command::new("kcmshell6")
+                        .arg("kcm_kscreen")
+                        .spawn()
+                })
+                .map_err(|e| e.to_string())?;
+        }
+        _ => return Err(format!("Unknown desktop action: {}", action)),
+    }
+    Ok(())
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct DesktopExtensionItem {
+    label: String,
+    icon: Option<String>,
+    exec: String,
+    separator_before: Option<bool>,
+}
+
+#[tauri::command]
+fn cmd_get_desktop_menu_extensions() -> Vec<DesktopExtensionItem> {
+    let ext_dir = dirs::home_dir()
+        .map(|h| h.join(".local/share/luzumi/desktop-menu.d"));
+    let Some(dir) = ext_dir else { return vec![] };
+    if !dir.exists() { return vec![]; }
+
+    let mut items = Vec::new();
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    #[derive(serde::Deserialize)]
+                    struct ExtFile { items: Vec<DesktopExtensionItem> }
+                    if let Ok(parsed) = serde_json::from_str::<ExtFile>(&content) {
+                        items.extend(parsed.items);
+                    }
+                }
+            }
+        }
+    }
+    items
+}
+
+#[tauri::command]
+fn cmd_exec_desktop_extension(exec: String) -> Result<(), String> {
+    let parts: Vec<&str> = exec.split_whitespace().collect();
+    if parts.is_empty() {
+        return Err("Empty command".into());
+    }
+    let mut cmd = std::process::Command::new(parts[0]);
+    if parts.len() > 1 {
+        cmd.args(&parts[1..]);
+    }
+    cmd.spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // ── Portal install/uninstall ──
 
 fn inject_filechooser_line(conf_path: &std::path::Path, desktop: &str) -> Result<(), String> {
@@ -903,6 +1115,33 @@ fn cmd_install_portal() -> Result<(), String> {
         .status()
         .ok();
 
+    // ── KDE Plasma ContainmentAction plugin ──
+    // Copy the pre-compiled plugin .so if available
+    let plugin_src = exe.parent()
+        .map(|p| p.join("com.luzumi.desktopmenu.so"))
+        .filter(|p| p.exists());
+    if let Some(plugin_path) = plugin_src {
+        // Detect Qt6 plugin dir (usually /usr/lib64/qt6/plugins on Fedora)
+        let qt_plugin_dir = std::process::Command::new("qtpaths6")
+            .arg("--plugin-dir")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| std::path::PathBuf::from(s.trim()))
+            .unwrap_or_else(|| std::path::PathBuf::from("/usr/lib64/qt6/plugins"));
+        let plugin_dir = qt_plugin_dir.join("plasma/containmentactions");
+        // This requires root — use pkexec to copy and set permissions
+        let dest = plugin_dir.join("com.luzumi.desktopmenu.so");
+        std::process::Command::new("pkexec")
+            .args(["install", "-m", "755", &plugin_path.to_string_lossy(), &dest.to_string_lossy()])
+            .status()
+            .ok();
+    }
+
+    // Create extension directory for third-party desktop menu items
+    let ext_dir = home.join(".local/share/luzumi/desktop-menu.d");
+    fs::create_dir_all(&ext_dir).ok();
+
     Ok(())
 }
 
@@ -951,6 +1190,22 @@ fn cmd_uninstall_portal() -> Result<(), String> {
         .args(["--user", "restart", "xdg-desktop-portal"])
         .status()
         .ok();
+
+    // Remove KDE ContainmentAction plugin
+    let qt_plugin_dir = std::process::Command::new("qtpaths6")
+        .arg("--plugin-dir")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| std::path::PathBuf::from(s.trim()))
+        .unwrap_or_else(|| std::path::PathBuf::from("/usr/lib64/qt6/plugins"));
+    let plugin_file = qt_plugin_dir.join("plasma/containmentactions/com.luzumi.desktopmenu.so");
+    if plugin_file.exists() {
+        std::process::Command::new("pkexec")
+            .args(["rm", &plugin_file.to_string_lossy()])
+            .status()
+            .ok();
+    }
 
     let index_db = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
@@ -1255,6 +1510,731 @@ fn cmd_show_context_menu(window: tauri::Window, items: Vec<NativeMenuItem>) -> R
     Ok(())
 }
 
+// ── Advanced Search ──
+
+#[tauri::command]
+async fn cmd_search_advanced(
+    query: String,
+    filters: search::SearchFilter,
+    path: String,
+    recursive: bool,
+) -> Result<Vec<search::SearchResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        search::search_advanced(&query, &filters, Path::new(&path), recursive)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn cmd_search_content(
+    query: String,
+    path: String,
+    recursive: bool,
+    max_matches: Option<usize>,
+) -> Result<Vec<search::ContentMatch>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        search::search_content(&query, Path::new(&path), recursive, max_matches.unwrap_or(500))
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn cmd_search_cancel() {
+    search::SEARCH_CANCEL.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+// ── Preview ──
+
+#[tauri::command]
+async fn cmd_read_pdf_page(path: String, page: u32) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        preview::read_pdf_page(&path, page)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn cmd_get_pdf_page_count(path: String) -> Result<u32, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        preview::get_pdf_page_count(&path)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn cmd_render_markdown(content: String) -> String {
+    preview::render_markdown(&content)
+}
+
+#[tauri::command]
+async fn cmd_read_hex(path: String, offset: usize, length: usize) -> Result<preview::HexData, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        preview::read_hex(&path, offset, length)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn cmd_read_file_preview(path: String, max_lines: Option<usize>) -> Result<(String, String), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        preview::read_file_preview(&path, max_lines.unwrap_or(500))
+    }).await.map_err(|e| e.to_string())?
+}
+
+// ── Tags ──
+
+#[tauri::command]
+fn cmd_create_tag(name: String, color: String) -> Result<tags::Tag, String> {
+    tags::create_tag(&name, &color)
+}
+
+#[tauri::command]
+fn cmd_delete_tag(id: i64) -> Result<(), String> {
+    tags::delete_tag(id)
+}
+
+#[tauri::command]
+fn cmd_rename_tag(id: i64, name: String) -> Result<(), String> {
+    tags::rename_tag(id, &name)
+}
+
+#[tauri::command]
+fn cmd_recolor_tag(id: i64, color: String) -> Result<(), String> {
+    tags::recolor_tag(id, &color)
+}
+
+#[tauri::command]
+fn cmd_list_tags() -> Result<Vec<tags::Tag>, String> {
+    tags::list_tags()
+}
+
+#[tauri::command]
+fn cmd_tag_file(path: String, tag_id: i64) -> Result<(), String> {
+    tags::tag_file(&path, tag_id)
+}
+
+#[tauri::command]
+fn cmd_untag_file(path: String, tag_id: i64) -> Result<(), String> {
+    tags::untag_file(&path, tag_id)
+}
+
+#[tauri::command]
+fn cmd_get_file_tags(path: String) -> Result<Vec<tags::Tag>, String> {
+    tags::get_file_tags(&path)
+}
+
+#[tauri::command]
+fn cmd_get_files_by_tag(tag_id: i64) -> Result<Vec<String>, String> {
+    tags::get_files_by_tag(tag_id)
+}
+
+#[tauri::command]
+fn cmd_get_all_file_tags(paths: Vec<String>) -> Result<Vec<tags::FileTag>, String> {
+    tags::get_all_file_tags(&paths)
+}
+
+// ── Compare ──
+
+#[tauri::command]
+async fn cmd_compare_directories(left: String, right: String) -> Result<compare::ComparisonResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        compare::compare_directories(&left, &right)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn cmd_compare_files(path1: String, path2: String) -> Result<compare::FileComparisonResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        compare::compare_files(&path1, &path2)
+    }).await.map_err(|e| e.to_string())?
+}
+
+// ── Logging ──
+
+#[tauri::command]
+fn cmd_get_logs(lines: Option<usize>) -> Result<Vec<logging::LogEntry>, String> {
+    logging::get_logs(lines.unwrap_or(200))
+}
+
+#[tauri::command]
+fn cmd_export_logs(path: String) -> Result<(), String> {
+    logging::export_logs(&path)
+}
+
+// ── Session ──
+
+#[tauri::command]
+fn cmd_save_session(session: String) -> Result<(), String> {
+    let config_dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join("luzumi");
+    fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
+    fs::write(config_dir.join("session.json"), session).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_load_session() -> Result<Option<String>, String> {
+    let config_dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join("luzumi");
+    let path = config_dir.join("session.json");
+    if path.exists() {
+        Ok(Some(fs::read_to_string(path).map_err(|e| e.to_string())?))
+    } else {
+        Ok(None)
+    }
+}
+
+// ── Favorites ──
+
+#[tauri::command]
+fn cmd_toggle_favorite(path: String) -> Result<Vec<String>, String> {
+    let config_dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join("luzumi");
+    fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
+    let fav_path = config_dir.join("favorites.json");
+    let mut favorites: Vec<String> = if fav_path.exists() {
+        let data = fs::read_to_string(&fav_path).map_err(|e| e.to_string())?;
+        serde_json::from_str(&data).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    if let Some(idx) = favorites.iter().position(|p| p == &path) {
+        favorites.remove(idx);
+    } else {
+        favorites.push(path);
+    }
+
+    fs::write(fav_path, serde_json::to_string(&favorites).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    Ok(favorites)
+}
+
+#[tauri::command]
+fn cmd_get_favorites() -> Result<Vec<String>, String> {
+    let config_dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join("luzumi");
+    let fav_path = config_dir.join("favorites.json");
+    if fav_path.exists() {
+        let data = fs::read_to_string(&fav_path).map_err(|e| e.to_string())?;
+        Ok(serde_json::from_str(&data).unwrap_or_default())
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+// ── Operation Queue ──
+
+#[tauri::command]
+fn cmd_list_operations() -> Vec<operation_queue::OperationInfo> {
+    operation_queue::QUEUE.list_operations()
+}
+
+#[tauri::command]
+fn cmd_pause_operation(id: String) -> Result<(), String> {
+    operation_queue::QUEUE.pause_operation(&id)
+}
+
+#[tauri::command]
+fn cmd_resume_operation(id: String) -> Result<(), String> {
+    operation_queue::QUEUE.resume_operation(&id)
+}
+
+#[tauri::command]
+fn cmd_cancel_operation_by_id(id: String) -> Result<(), String> {
+    operation_queue::QUEUE.cancel_operation(&id)
+}
+
+// ── Workspaces ──
+
+#[tauri::command]
+fn cmd_save_workspace(name: String, data: String) -> Result<(), String> {
+    let dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join("luzumi").join("workspaces");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let safe_name = name.replace(['/', '\\', '\0'], "_");
+    fs::write(dir.join(format!("{}.json", safe_name)), data).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cmd_load_workspace(name: String) -> Result<Option<String>, String> {
+    let dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join("luzumi").join("workspaces");
+    let safe_name = name.replace(['/', '\\', '\0'], "_");
+    let path = dir.join(format!("{}.json", safe_name));
+    if path.exists() {
+        Ok(Some(fs::read_to_string(path).map_err(|e| e.to_string())?))
+    } else {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+fn cmd_list_workspaces() -> Result<Vec<String>, String> {
+    let dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join("luzumi").join("workspaces");
+    if !dir.exists() { return Ok(Vec::new()); }
+    let entries = fs::read_dir(&dir).map_err(|e| e.to_string())?;
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|ext| ext == "json").unwrap_or(false))
+        .filter_map(|e| e.path().file_stem().map(|s| s.to_string_lossy().to_string()))
+        .collect();
+    names.sort();
+    Ok(names)
+}
+
+#[tauri::command]
+fn cmd_delete_workspace(name: String) -> Result<(), String> {
+    let dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join("luzumi").join("workspaces");
+    let safe_name = name.replace(['/', '\\', '\0'], "_");
+    let path = dir.join(format!("{}.json", safe_name));
+    if path.exists() {
+        fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+// ── Plugins ──
+
+#[tauri::command]
+fn cmd_list_plugins() -> Result<Vec<plugins::PluginInfo>, String> {
+    plugins::list_plugins()
+}
+
+#[tauri::command]
+fn cmd_enable_plugin(name: String) -> Result<(), String> {
+    plugins::enable_plugin(&name)
+}
+
+#[tauri::command]
+fn cmd_disable_plugin(name: String) -> Result<(), String> {
+    plugins::disable_plugin(&name)
+}
+
+#[tauri::command]
+fn cmd_get_plugin_script(name: String) -> Result<String, String> {
+    plugins::get_plugin_script(&name)
+}
+
+#[tauri::command]
+fn cmd_install_plugin(source: String) -> Result<String, String> {
+    plugins::install_plugin_from_dir(&source)
+}
+
+#[tauri::command]
+fn cmd_uninstall_plugin(name: String) -> Result<(), String> {
+    plugins::uninstall_plugin(&name)
+}
+
+// ── Directory analysis (smart suggestions) ──
+
+#[derive(serde::Serialize)]
+struct SuggestedAction {
+    action: String,
+    description: String,
+    icon: String,
+}
+
+#[derive(serde::Serialize)]
+struct DirectoryAnalysis {
+    suggested_actions: Vec<SuggestedAction>,
+}
+
+#[tauri::command]
+async fn cmd_analyze_directory(path: String) -> Result<DirectoryAnalysis, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = Path::new(&path);
+        let entries: Vec<_> = fs::read_dir(dir).map_err(|e| e.to_string())?
+            .filter_map(|e| e.ok())
+            .collect();
+
+        let mut suggestions = Vec::new();
+        let mut ext_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut large_files = 0;
+
+        for entry in &entries {
+            if let Ok(meta) = entry.metadata() {
+                let ext = entry.path().extension()
+                    .map(|e| e.to_string_lossy().to_lowercase())
+                    .unwrap_or_default();
+                if !ext.is_empty() {
+                    *ext_counts.entry(ext).or_default() += 1;
+                }
+                if meta.is_file() && meta.len() > 100 * 1024 * 1024 {
+                    large_files += 1;
+                }
+            }
+        }
+
+        // Suggest organizing by type if mixed
+        if ext_counts.len() > 5 && entries.len() > 20 {
+            suggestions.push(SuggestedAction {
+                action: "organize".into(),
+                description: "Many file types detected. Organize by type?".into(),
+                icon: "FolderOpen".into(),
+            });
+        }
+
+        // Suggest finding duplicates if many files
+        if entries.len() > 50 {
+            suggestions.push(SuggestedAction {
+                action: "duplicates".into(),
+                description: "Many files here. Check for duplicates?".into(),
+                icon: "Copy".into(),
+            });
+        }
+
+        // Suggest archiving if large files exist
+        if large_files > 0 {
+            suggestions.push(SuggestedAction {
+                action: "archive-large".into(),
+                description: format!("{} large file(s) found. Consider archiving?", large_files),
+                icon: "Archive".into(),
+            });
+        }
+
+        // Suggest bulk rename if many similarly-named files
+        for (ext, count) in &ext_counts {
+            if *count > 10 {
+                suggestions.push(SuggestedAction {
+                    action: "bulk-rename".into(),
+                    description: format!("{} .{} files. Bulk rename?", count, ext),
+                    icon: "Edit".into(),
+                });
+                break;
+            }
+        }
+
+        Ok(DirectoryAnalysis { suggested_actions: suggestions })
+    }).await.map_err(|e| e.to_string())?
+}
+
+// ── Vault commands ──────────────────────────────────────────────
+
+#[tauri::command]
+async fn cmd_create_vault(path: String, password: String, dummy_password: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        vault::create_vault(&path, &password, dummy_password.as_deref())
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn cmd_unlock_vault(vault_path: String, password: String) -> Result<vault::VaultUnlockResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        vault::unlock_vault(&vault_path, &password)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn cmd_lock_vault(vault_path: String, mount_path: String, password: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        vault::lock_vault(&vault_path, &mount_path, &password)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn cmd_change_vault_password(vault_path: String, old_password: String, new_password: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        vault::change_vault_password(&vault_path, &old_password, &new_password)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn cmd_set_dummy_content(vault_path: String, main_password: String, dummy_password: String, dummy_dir: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        vault::set_dummy_content(&vault_path, &main_password, &dummy_password, &dummy_dir)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn cmd_is_vault(path: String) -> bool {
+    vault::is_vault(&path)
+}
+
+#[tauri::command]
+fn cmd_get_vault_info(path: String) -> Result<vault::VaultInfo, String> {
+    vault::get_vault_info(&path)
+}
+
+#[tauri::command]
+fn cmd_list_unlocked_vaults() -> Vec<String> {
+    vault::list_unlocked_vaults()
+}
+
+#[derive(serde::Serialize, Clone)]
+struct IntegrityItem {
+    name: String,
+    path: String,
+    status: String, // "ok", "missing", "repaired", "error"
+    detail: String,
+}
+
+#[tauri::command]
+fn cmd_check_integrity(repair: bool) -> Vec<IntegrityItem> {
+    let mut results = Vec::new();
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => {
+            results.push(IntegrityItem {
+                name: "Home directory".into(),
+                path: String::new(),
+                status: "error".into(),
+                detail: "Cannot find home directory".into(),
+            });
+            return results;
+        }
+    };
+
+    let config_dir = dirs::config_dir().unwrap_or_else(|| home.join(".config")).join("luzumi");
+    let data_dir = dirs::data_dir().unwrap_or_else(|| home.join(".local/share")).join("luzumi");
+
+    // Directories that must exist
+    let required_dirs: Vec<(&str, std::path::PathBuf)> = vec![
+        ("Config directory", config_dir.clone()),
+        ("Data directory", data_dir.clone()),
+        ("Themes directory", config_dir.join("themes")),
+        ("Plugins directory", config_dir.join("plugins")),
+        ("Workspaces directory", config_dir.join("workspaces")),
+        ("Logs directory", data_dir.join("logs")),
+    ];
+
+    for (name, path) in &required_dirs {
+        if path.is_dir() {
+            results.push(IntegrityItem {
+                name: name.to_string(),
+                path: path.to_string_lossy().into(),
+                status: "ok".into(),
+                detail: String::new(),
+            });
+        } else if repair {
+            match fs::create_dir_all(path) {
+                Ok(_) => results.push(IntegrityItem {
+                    name: name.to_string(),
+                    path: path.to_string_lossy().into(),
+                    status: "repaired".into(),
+                    detail: "Created missing directory".into(),
+                }),
+                Err(e) => results.push(IntegrityItem {
+                    name: name.to_string(),
+                    path: path.to_string_lossy().into(),
+                    status: "error".into(),
+                    detail: format!("Failed to create: {}", e),
+                }),
+            }
+        } else {
+            results.push(IntegrityItem {
+                name: name.to_string(),
+                path: path.to_string_lossy().into(),
+                status: "missing".into(),
+                detail: "Directory does not exist".into(),
+            });
+        }
+    }
+
+    // Tags database
+    let tags_db = data_dir.join("tags.db");
+    if tags_db.exists() {
+        // Verify it's a valid SQLite database
+        match rusqlite::Connection::open(&tags_db) {
+            Ok(conn) => {
+                match conn.execute_batch("SELECT 1 FROM tags LIMIT 1") {
+                    Ok(_) => results.push(IntegrityItem {
+                        name: "Tags database".into(),
+                        path: tags_db.to_string_lossy().into(),
+                        status: "ok".into(),
+                        detail: String::new(),
+                    }),
+                    Err(_) => {
+                        if repair {
+                            // Re-initialize the tables
+                            let init = tags::init_db();
+                            results.push(IntegrityItem {
+                                name: "Tags database".into(),
+                                path: tags_db.to_string_lossy().into(),
+                                status: if init.is_ok() { "repaired" } else { "error" }.into(),
+                                detail: if init.is_ok() {
+                                    "Re-initialized tables".into()
+                                } else {
+                                    format!("Failed to reinit: {}", init.unwrap_err())
+                                },
+                            });
+                        } else {
+                            results.push(IntegrityItem {
+                                name: "Tags database".into(),
+                                path: tags_db.to_string_lossy().into(),
+                                status: "missing".into(),
+                                detail: "Tables missing or corrupted".into(),
+                            });
+                        }
+                    }
+                }
+            }
+            Err(e) => results.push(IntegrityItem {
+                name: "Tags database".into(),
+                path: tags_db.to_string_lossy().into(),
+                status: "error".into(),
+                detail: format!("Cannot open: {}", e),
+            }),
+        }
+    } else if repair {
+        let init = tags::init_db();
+        results.push(IntegrityItem {
+            name: "Tags database".into(),
+            path: tags_db.to_string_lossy().into(),
+            status: if init.is_ok() { "repaired" } else { "error" }.into(),
+            detail: if init.is_ok() {
+                "Created database".into()
+            } else {
+                format!("Failed to create: {}", init.unwrap_err())
+            },
+        });
+    } else {
+        results.push(IntegrityItem {
+            name: "Tags database".into(),
+            path: tags_db.to_string_lossy().into(),
+            status: "missing".into(),
+            detail: "Database file does not exist".into(),
+        });
+    }
+
+    // Desktop entry
+    let desktop_file = home.join(".local/share/applications/luzumi.desktop");
+    if desktop_file.exists() {
+        results.push(IntegrityItem {
+            name: "Desktop entry".into(),
+            path: desktop_file.to_string_lossy().into(),
+            status: "ok".into(),
+            detail: String::new(),
+        });
+    } else {
+        if repair {
+            match cmd_set_as_default_file_manager() {
+                Ok(_) => results.push(IntegrityItem {
+                    name: "Desktop entry".into(),
+                    path: desktop_file.to_string_lossy().into(),
+                    status: "repaired".into(),
+                    detail: "Registered as file manager".into(),
+                }),
+                Err(e) => results.push(IntegrityItem {
+                    name: "Desktop entry".into(),
+                    path: desktop_file.to_string_lossy().into(),
+                    status: "error".into(),
+                    detail: format!("Failed: {}", e),
+                }),
+            }
+        } else {
+            results.push(IntegrityItem {
+                name: "Desktop entry".into(),
+                path: desktop_file.to_string_lossy().into(),
+                status: "missing".into(),
+                detail: "Not registered as application".into(),
+            });
+        }
+    }
+
+    // MIME type association
+    let mimeapps = home.join(".config/mimeapps.list");
+    if mimeapps.exists() {
+        let content = fs::read_to_string(&mimeapps).unwrap_or_default();
+        if content.contains("inode/directory=luzumi") {
+            results.push(IntegrityItem {
+                name: "MIME association".into(),
+                path: mimeapps.to_string_lossy().into(),
+                status: "ok".into(),
+                detail: "Set as default for directories".into(),
+            });
+        } else {
+            results.push(IntegrityItem {
+                name: "MIME association".into(),
+                path: mimeapps.to_string_lossy().into(),
+                status: "missing".into(),
+                detail: "Not set as default file manager".into(),
+            });
+        }
+    } else {
+        results.push(IntegrityItem {
+            name: "MIME association".into(),
+            path: mimeapps.to_string_lossy().into(),
+            status: "missing".into(),
+            detail: "mimeapps.list not found".into(),
+        });
+    }
+
+    // Binary in PATH
+    let luzumi_bin = home.join(".local/bin/luzumi");
+    if luzumi_bin.exists() {
+        results.push(IntegrityItem {
+            name: "Binary in ~/.local/bin".into(),
+            path: luzumi_bin.to_string_lossy().into(),
+            status: "ok".into(),
+            detail: String::new(),
+        });
+    } else {
+        results.push(IntegrityItem {
+            name: "Binary in ~/.local/bin".into(),
+            path: luzumi_bin.to_string_lossy().into(),
+            status: "missing".into(),
+            detail: "Binary not installed (optional)".into(),
+        });
+    }
+
+    // Portal
+    let portal_file = home.join(".local/share/xdg-desktop-portal/portals/luzumi.portal");
+    if portal_file.exists() {
+        results.push(IntegrityItem {
+            name: "XDG Portal".into(),
+            path: portal_file.to_string_lossy().into(),
+            status: "ok".into(),
+            detail: String::new(),
+        });
+    } else {
+        results.push(IntegrityItem {
+            name: "XDG Portal".into(),
+            path: portal_file.to_string_lossy().into(),
+            status: "missing".into(),
+            detail: "Portal not installed (optional)".into(),
+        });
+    }
+
+    // Plugins enabled file
+    let enabled_plugins = config_dir.join("plugins").join(".enabled.json");
+    if enabled_plugins.exists() {
+        results.push(IntegrityItem {
+            name: "Plugin registry".into(),
+            path: enabled_plugins.to_string_lossy().into(),
+            status: "ok".into(),
+            detail: String::new(),
+        });
+    } else if repair {
+        match fs::write(&enabled_plugins, "[]") {
+            Ok(_) => results.push(IntegrityItem {
+                name: "Plugin registry".into(),
+                path: enabled_plugins.to_string_lossy().into(),
+                status: "repaired".into(),
+                detail: "Created empty plugin registry".into(),
+            }),
+            Err(e) => results.push(IntegrityItem {
+                name: "Plugin registry".into(),
+                path: enabled_plugins.to_string_lossy().into(),
+                status: "error".into(),
+                detail: format!("Failed to create: {}", e),
+            }),
+        }
+    } else {
+        results.push(IntegrityItem {
+            name: "Plugin registry".into(),
+            path: enabled_plugins.to_string_lossy().into(),
+            status: "missing".into(),
+            detail: "No plugin registry file".into(),
+        });
+    }
+
+    results
+}
+
 pub fn run() {
     // Ignore SIGPIPE to prevent crashes when writing to closed pipes (e.g., root shell)
     #[cfg(unix)]
@@ -1262,11 +2242,55 @@ pub fn run() {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
 
+    // Initialize logging
+    logging::init_logging();
+
     let picker_config = parse_picker_args();
+    let desktop_menu_config = parse_desktop_menu_args();
+    let dm_config_for_setup = desktop_menu_config.clone();
 
     tauri::Builder::default()
         .manage(Mutex::new(picker_config))
+        .manage(Mutex::new(desktop_menu_config))
         .manage(Mutex::new(WatcherState { main: None, split: None, trash: None }))
+        .setup(move |app| {
+            // If in desktop-menu mode, reconfigure the main window as a small popup
+            if let Some(config) = dm_config_for_setup {
+                use tauri::Manager;
+                use tauri::WebviewWindowBuilder;
+                use tauri::WebviewUrl;
+
+                // Hide the default main window
+                if let Some(main_win) = app.get_webview_window("main") {
+                    let _ = main_win.hide();
+                    let _ = main_win.close();
+                }
+
+                // Create a new popup window at the exact click position
+                let _popup = WebviewWindowBuilder::new(
+                    app,
+                    "desktop-menu",
+                    WebviewUrl::App("index.html".into()),
+                )
+                .title("")
+                .inner_size(280.0, 420.0)
+                .position(config.x as f64, config.y as f64)
+                .decorations(false)
+                .transparent(true)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .resizable(false)
+                .minimizable(false)
+                .focused(true)
+                .visible(true)
+                .initialization_script(&format!(
+                    "window.__LUZUMI_DESKTOP_MENU__ = {{ x: {}, y: {} }};",
+                    config.x, config.y
+                ))
+                .build();
+            }
+            Ok(())
+        })
         .on_menu_event(|app, event| {
             let _ = app.emit("context-menu-action", event.id().0.clone());
         })
@@ -1276,6 +2300,8 @@ pub fn run() {
             open_file,
             cmd_list_open_with_apps,
             cmd_open_with_app,
+            cmd_open_with_command,
+            cmd_set_default_app,
             cmd_search_index,
             cmd_create_directory,
             cmd_rename_entry,
@@ -1339,6 +2365,74 @@ pub fn run() {
             cmd_create_symlink,
             cmd_get_trash_item_info,
             cmd_get_all_trash_info,
+            // Search
+            cmd_search_advanced,
+            cmd_search_content,
+            cmd_search_cancel,
+            // Preview
+            cmd_read_pdf_page,
+            cmd_get_pdf_page_count,
+            cmd_render_markdown,
+            cmd_read_hex,
+            cmd_read_file_preview,
+            // Tags
+            cmd_create_tag,
+            cmd_delete_tag,
+            cmd_rename_tag,
+            cmd_recolor_tag,
+            cmd_list_tags,
+            cmd_tag_file,
+            cmd_untag_file,
+            cmd_get_file_tags,
+            cmd_get_files_by_tag,
+            cmd_get_all_file_tags,
+            // Compare
+            cmd_compare_directories,
+            cmd_compare_files,
+            // Logging
+            cmd_get_logs,
+            cmd_export_logs,
+            // Session
+            cmd_save_session,
+            cmd_load_session,
+            // Favorites
+            cmd_toggle_favorite,
+            cmd_get_favorites,
+            // Operation Queue
+            cmd_list_operations,
+            cmd_pause_operation,
+            cmd_resume_operation,
+            cmd_cancel_operation_by_id,
+            // Workspaces
+            cmd_save_workspace,
+            cmd_load_workspace,
+            cmd_list_workspaces,
+            cmd_delete_workspace,
+            // Plugins
+            cmd_list_plugins,
+            cmd_enable_plugin,
+            cmd_disable_plugin,
+            cmd_get_plugin_script,
+            cmd_install_plugin,
+            cmd_uninstall_plugin,
+            // Smart suggestions
+            cmd_analyze_directory,
+            // Desktop Menu
+            cmd_get_desktop_menu_config,
+            cmd_desktop_action,
+            cmd_get_desktop_menu_extensions,
+            cmd_exec_desktop_extension,
+            // Vault
+            cmd_create_vault,
+            cmd_unlock_vault,
+            cmd_lock_vault,
+            cmd_change_vault_password,
+            cmd_set_dummy_content,
+            cmd_is_vault,
+            cmd_get_vault_info,
+            cmd_list_unlocked_vaults,
+            // Integrity
+            cmd_check_integrity,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

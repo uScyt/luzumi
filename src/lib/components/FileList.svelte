@@ -5,6 +5,7 @@
   import { t } from "../i18n";
   import { renderIcon } from "../icons";
   import FileTooltip from "./FileTooltip.svelte";
+  import SkeletonRow from "./SkeletonRow.svelte";
   import VirtualScroller from "./VirtualScroller.svelte";
 
   // Rubber band selection
@@ -59,6 +60,14 @@
 
   let renameInput = $state<HTMLInputElement | null>(null);
 
+  $effect(() => {
+    if (renameInput && fm.renameTarget) {
+      renameCommitted = false;
+      renameInput.focus();
+      renameInput.select();
+    }
+  });
+
   // Tooltip
   let tooltipEntry = $state<FileEntry | null>(null);
   let tooltipPos = $state({ x: 0, y: 0 });
@@ -91,12 +100,16 @@
     });
   }
 
+  let renameCommitted = false;
+
   function commitRename() {
-    if (!fm.renameTarget) return;
+    if (renameCommitted || !fm.renameTarget) return;
+    renameCommitted = true;
+    const target = fm.renameTarget;
     const buf = fm.renameBuffer.trim();
-    const entry = fm.entries.find((e) => e.path === fm.renameTarget);
+    const entry = fm.entries.find((e) => e.path === target);
     if (buf && entry && buf !== entry.name) {
-      fm.rename(fm.renameTarget, buf);
+      fm.rename(target, buf);
     } else {
       fm.renameTarget = null;
     }
@@ -111,7 +124,7 @@
   }
 
   function onRowKeyDown(e: KeyboardEvent, entry: FileEntry) {
-    if (e.key === "Enter") { onRowDblClick(entry); return; }
+    if (e.key === "Enter") { if (!fm.renameTarget) onRowDblClick(entry); return; }
     if (e.key === "F2") {
       e.preventDefault();
       fm.startRename(entry);
@@ -160,6 +173,9 @@
 <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
 <div
   class="list-container"
+  role="listbox"
+  aria-label="File list"
+  tabindex="0"
   style="--row-h: {listRowHeight}px; --icon-s: {listIconSize}px; --col-icon-w: {colIconWidth}px"
   bind:this={containerEl}
   oncontextmenu={(e) => onContextMenu(e, null)}
@@ -185,7 +201,11 @@
     </button>
   </div>
 
-  {#if displayed.length === 0}
+  {#if fm.isLoading && displayed.length === 0}
+    <div class="list-body">
+      <SkeletonRow type="list" count={10} />
+    </div>
+  {:else if displayed.length === 0}
     <div class="list-body">
       <div class="empty-state">
         <svg width="40" height="40" viewBox="0 0 16 16" fill="none" opacity=".25">
@@ -208,6 +228,7 @@
             class:cut={fm.clipboard?.mode === "cut" && fm.clipboard.paths.includes(entry.path)}
             class:drop-target={fm.dropTarget === entry.path}
             class:dragging={fm.dragPaths.includes(entry.path)}
+            class:hidden-entry={entry.isHidden}
             role="row"
             tabindex="0"
             data-path={entry.path}
@@ -250,6 +271,7 @@
                   bind:value={fm.renameBuffer}
                   onclick={(e) => e.stopPropagation()}
                   onkeydown={(e) => {
+                    e.stopPropagation();
                     if (e.key === "Enter") { e.preventDefault(); commitRename(); }
                     if (e.key === "Escape") { e.preventDefault(); fm.renameTarget = null; }
                   }}
@@ -399,6 +421,10 @@
 
   .file-row.selected:hover {
     background: var(--accent-muted);
+  }
+
+  .file-row.hidden-entry {
+    opacity: 0.55;
   }
 
   .file-row.cut {

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { listen } from "@tauri-apps/api/event";
   import { fm } from "./lib/fileManager.svelte";
@@ -33,20 +34,110 @@
   import PreviewPane from "./lib/components/PreviewPane.svelte";
   import SplitPane from "./lib/components/SplitPane.svelte";
   import PickerFooter from "./lib/components/PickerFooter.svelte";
+  import CommandPalette from "./lib/components/CommandPalette.svelte";
+  import AdvancedSearchPanel from "./lib/components/AdvancedSearchPanel.svelte";
+  import OnboardingOverlay from "./lib/components/OnboardingOverlay.svelte";
+  import ActionConfirmation from "./lib/components/ActionConfirmation.svelte";
+  import DebugPanel from "./lib/components/DebugPanel.svelte";
+  import OperationQueue from "./lib/components/OperationQueue.svelte";
+  import SuggestionBar from "./lib/components/SuggestionBar.svelte";
+  import FolderCompareView from "./lib/components/FolderCompareView.svelte";
+  import TagManagerDialog from "./lib/components/dialogs/TagManagerDialog.svelte";
+  import ErrorBoundary from "./lib/components/ErrorBoundary.svelte";
+  import VaultCreateDialog from "./lib/components/dialogs/VaultCreateDialog.svelte";
+  import VaultUnlockDialog from "./lib/components/dialogs/VaultUnlockDialog.svelte";
+  import DesktopMenu from "./lib/components/DesktopMenu.svelte";
+  import { commandRegistry } from "./lib/commandRegistry";
 
   const win = getCurrentWindow();
 
+  // Desktop menu mode: lightweight popup, no file manager UI
+  // Synchronous check via global JS flag injected by Rust setup() before Svelte loads
+  let isDesktopMenuMode = $state(!!(window as any).__LUZUMI_DESKTOP_MENU__);
+
+  // Apply appearance settings reactively to the DOM
+  $effect(() => {
+    document.documentElement.style.setProperty("--font-size-base", `${fm.ui.fontSize}px`);
+  });
+  $effect(() => {
+    document.documentElement.style.setProperty("--line-height-base", `${fm.ui.lineHeight}`);
+  });
+  $effect(() => {
+    document.documentElement.classList.toggle("density-compact", fm.ui.density === "compact");
+    document.documentElement.classList.toggle("density-dense", fm.ui.density === "dense");
+  });
+  $effect(() => {
+    document.documentElement.classList.toggle("high-contrast", fm.ui.highContrast);
+  });
+  $effect(() => {
+    document.documentElement.classList.toggle("no-animations", !fm.ui.animationsEnabled);
+  });
+
   onMount(() => {
+    // In desktop-menu mode, skip all file manager initialization
+    if (isDesktopMenuMode) return;
+
+    // Register all commands for the command palette
+    commandRegistry.registerMany([
+      { id: "nav.back", label: "Go Back", shortcut: "Alt+←", category: "navigation", action: () => fm.goBack() },
+      { id: "nav.forward", label: "Go Forward", shortcut: "Alt+→", category: "navigation", action: () => fm.goForward() },
+      { id: "nav.up", label: "Go Up", shortcut: "Alt+↑", category: "navigation", action: () => fm.goUp() },
+      { id: "nav.home", label: "Go Home", category: "navigation", action: async () => { try { const h = await invoke<string>("get_home_dir"); fm.navigate(h); } catch { fm.navigate("/home"); } } },
+      { id: "nav.reload", label: "Reload", shortcut: "F5", category: "navigation", action: () => fm.reload() },
+      { id: "file.newFolder", label: "New Folder", shortcut: "Ctrl+Shift+N", category: "file", action: () => fm.createFolder() },
+      { id: "file.newFile", label: "New File", category: "file", action: () => fm.createFile() },
+      { id: "file.delete", label: "Delete Selected", shortcut: "Delete", category: "file", action: () => fm.deleteSelected() },
+      { id: "file.secureDelete", label: "Secure Delete", shortcut: "Shift+Delete", category: "file", action: () => fm.triggerSecureDelete() },
+      { id: "file.rename", label: "Rename", shortcut: "F2", category: "file", action: () => { const first = [...fm.selected][0]; const entry = fm.entries.find(x => x.path === first); if (entry) fm.startRename(entry); } },
+      { id: "file.properties", label: "Properties", category: "file", action: () => { const first = [...fm.selected][0]; const entry = fm.entries.find(x => x.path === first); if (entry) fm.showProperties = entry; } },
+      { id: "file.openTerminal", label: "Open Terminal Here", shortcut: "Ctrl+T", category: "file", action: () => fm.openTerminal() },
+      { id: "edit.copy", label: "Copy", shortcut: "Ctrl+C", category: "edit", action: () => fm.copySelected() },
+      { id: "edit.cut", label: "Cut", shortcut: "Ctrl+X", category: "edit", action: () => fm.cutSelected() },
+      { id: "edit.paste", label: "Paste", shortcut: "Ctrl+V", category: "edit", action: () => fm.paste() },
+      { id: "edit.duplicate", label: "Duplicate", shortcut: "Ctrl+D", category: "edit", action: () => fm.duplicateSelected() },
+      { id: "edit.selectAll", label: "Select All", shortcut: "Ctrl+A", category: "edit", action: () => fm.selectAll() },
+      { id: "edit.invertSelection", label: "Invert Selection", shortcut: "Ctrl+Shift+A", category: "edit", action: () => fm.invertSelection() },
+      { id: "edit.selectPattern", label: "Select by Pattern", shortcut: "Ctrl+G", category: "edit", action: () => { fm.showSelectPattern = true; } },
+      { id: "edit.undo", label: "Undo", shortcut: "Ctrl+Z", category: "edit", action: () => fm.undo() },
+      { id: "edit.redo", label: "Redo", shortcut: "Ctrl+Y", category: "edit", action: () => fm.redo() },
+      { id: "view.list", label: "List View", shortcut: "Ctrl+1", category: "view", action: () => { fm.viewMode = "list"; } },
+      { id: "view.grid", label: "Grid View", shortcut: "Ctrl+2", category: "view", action: () => { fm.viewMode = "grid"; } },
+      { id: "view.toggleHidden", label: "Toggle Hidden Files", shortcut: "Ctrl+H", category: "view", action: () => fm.toggleHidden() },
+      { id: "view.togglePreview", label: "Toggle Preview Pane", shortcut: "Ctrl+P", category: "view", action: () => { fm.showPreview = !fm.showPreview; } },
+      { id: "view.splitView", label: "Toggle Split View", shortcut: "F3", category: "view", action: () => fm.toggleSplitView() },
+      { id: "tools.search", label: "Search", shortcut: "Ctrl+F", category: "tools", action: () => { fm.focusSearch = true; } },
+      { id: "tools.advancedSearch", label: "Advanced Search", shortcut: "Ctrl+Shift+F", category: "tools", action: () => { fm.search.showAdvancedPanel = !fm.search.showAdvancedPanel; } },
+      { id: "tools.addressBar", label: "Focus Address Bar", shortcut: "Ctrl+L", category: "tools", action: () => { fm.focusAddressBar = true; } },
+      { id: "tools.bulkRename", label: "Bulk Rename", category: "tools", action: () => { fm.showBulkRename = true; } },
+      { id: "tools.findDuplicates", label: "Find Duplicates", category: "tools", action: () => { fm.showDuplicateFinder = true; } },
+      { id: "tools.commandPalette", label: "Command Palette", shortcut: "Ctrl+Shift+P", category: "tools", action: () => { fm.ui.showCommandPalette = !fm.ui.showCommandPalette; } },
+      { id: "settings.open", label: "Open Settings", shortcut: "Ctrl+,", category: "settings", action: () => { fm.showSettings = !fm.showSettings; } },
+      { id: "help.shortcuts", label: "Keyboard Shortcuts", shortcut: "?", category: "help", action: () => { fm.showKeyboardShortcuts = true; } },
+      { id: "tools.debugPanel", label: "Toggle Debug Panel", shortcut: "Ctrl+Shift+D", category: "tools", action: () => { fm.ui.showDebugPanel = !fm.ui.showDebugPanel; } },
+      { id: "tools.tagManager", label: "Tag Manager", category: "tools", action: () => { fm.ui.showTagManager = !fm.ui.showTagManager; } },
+      { id: "tools.folderCompare", label: "Compare Folders", category: "tools", action: () => { fm.ui.showFolderCompare = !fm.ui.showFolderCompare; } },
+      { id: "view.density.comfortable", label: "Comfortable Density", category: "view", action: () => fm.ui.setDensity("comfortable") },
+      { id: "view.density.compact", label: "Compact Density", category: "view", action: () => fm.ui.setDensity("compact") },
+      { id: "view.density.dense", label: "Dense Density", category: "view", action: () => fm.ui.setDensity("dense") },
+      { id: "view.toggleAnimations", label: "Toggle Animations", category: "view", action: () => fm.ui.toggleAnimations() },
+      { id: "view.toggleHighContrast", label: "Toggle High Contrast", category: "view", action: () => fm.ui.toggleHighContrast() },
+      { id: "nav.addTab", label: "New Tab", shortcut: "Ctrl+T", category: "navigation", action: () => fm.addTab() },
+      { id: "nav.closeTab", label: "Close Tab", shortcut: "Ctrl+W", category: "navigation", action: () => fm.closeTab(fm.activeTabIndex) },
+    ]);
+
     let unlisten1: (() => void) | undefined;
     let unlisten2: (() => void) | undefined;
+    let destroyed = false;
 
     (async () => {
       await fm.init();
+      if (destroyed) return;
       unlisten1 = await listen<{ current: string; done: number; total: number }>("delete-progress", (ev) => {
         if (fm.deleteProgress) {
           fm.deleteProgress = ev.payload;
         }
       });
+      if (destroyed) { unlisten1(); unlisten1 = undefined; return; }
       unlisten2 = await listen<{ current: string; done: number; total: number }>("copy-move-progress", (ev) => {
         const p = ev.payload;
         if (p.done >= p.total) {
@@ -55,9 +146,10 @@
           fm.copyMoveProgress = p;
         }
       });
+      if (destroyed) { unlisten2(); unlisten2 = undefined; return; }
     })();
 
-    return () => { unlisten1?.(); unlisten2?.(); fm.destroy(); };
+    return () => { destroyed = true; unlisten1?.(); unlisten2?.(); fm.destroy(); };
   });
 
   function onKeydown(e: KeyboardEvent) {
@@ -93,6 +185,13 @@
       return;
     }
 
+    // Command palette - works even from inputs
+    if (e.ctrlKey && e.shiftKey && e.key === "P") { e.preventDefault(); fm.ui.showCommandPalette = !fm.ui.showCommandPalette; return; }
+    // Debug panel
+    if (e.ctrlKey && e.shiftKey && e.key === "D") { e.preventDefault(); fm.ui.showDebugPanel = !fm.ui.showDebugPanel; return; }
+    // Advanced search
+    if (e.ctrlKey && e.shiftKey && e.key === "F") { e.preventDefault(); fm.search.showAdvancedPanel = !fm.search.showAdvancedPanel; return; }
+
     if (e.target instanceof HTMLInputElement) return;
 
     if (e.key === "Delete" && e.shiftKey) { e.preventDefault(); fm.triggerSecureDelete(); }
@@ -121,7 +220,7 @@
     if (e.ctrlKey && e.key === "t") { e.preventDefault(); fm.openTerminal(); }
     if (e.ctrlKey && e.key === "1") { e.preventDefault(); fm.viewMode = "list"; }
     if (e.ctrlKey && e.key === "2") { e.preventDefault(); fm.viewMode = "grid"; }
-    if (e.ctrlKey && e.shiftKey && e.key === "N") { e.preventDefault(); fm.showNewFolder = true; fm.newFolderName = "New Folder"; }
+    if (e.ctrlKey && e.shiftKey && e.key === "N") { e.preventDefault(); fm.createFolder(); }
     if (e.key === "F5") { e.preventDefault(); fm.reload(); }
     if (e.key === "F3") { e.preventDefault(); fm.toggleSplitView(); }
     if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); fm.goBack(); }
@@ -152,7 +251,11 @@
   }
 </script>
 
-<svelte:window onkeydown={onKeydown} onclick={onWindowClick} />
+<svelte:window onkeydown={(e) => { if (!isDesktopMenuMode) onKeydown(e); }} onclick={() => { if (!isDesktopMenuMode) onWindowClick(); }} />
+
+{#if isDesktopMenuMode}
+  <DesktopMenu />
+{:else}
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="app" class:picker-mode={fm.isPickerMode} role="application" oncontextmenu={(e) => e.preventDefault()}>
@@ -178,6 +281,9 @@
     <Sidebar />
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <main class="content" onclick={() => { fm.splitFocused = false; }} onkeydown={() => {}}>
+      {#if !fm.isPickerMode}
+        <SuggestionBar />
+      {/if}
       {#if fm.showDefaultBanner && !fm.showTrashView && !fm.isPickerMode}
         <DefaultBanner />
       {/if}
@@ -253,6 +359,9 @@
     <UnlockDriveDialog drive={fm.showUnlockDialog} />
   {/if}
 
+  <VaultCreateDialog />
+  <VaultUnlockDialog />
+
   {#if fm.showDragDropDialog}
     <DragDropDialog />
   {/if}
@@ -287,6 +396,15 @@
     <SettingsPanel />
   {/if}
 
+  <CommandPalette />
+  <AdvancedSearchPanel />
+  <OnboardingOverlay />
+  <ActionConfirmation />
+  <DebugPanel />
+  <OperationQueue />
+  <TagManagerDialog />
+  <FolderCompareView />
+
   {#if fm.error}
     <div class="toast toast-error" role="alert">
       <svg class="toast-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
@@ -302,20 +420,6 @@
     </div>
   {/if}
 
-  {#if fm.statusMessage}
-    <div class="toast toast-info" role="status">
-      <svg class="toast-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
-        <path d="M5 8L7 10L11 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-        <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4"/>
-      </svg>
-      <span>{fm.statusMessage}</span>
-      <button aria-label={t.dismissNotification} onclick={() => fm.clearStatus()}>
-        <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-          <path d="M3 3L13 13M13 3L3 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-      </button>
-    </div>
-  {/if}
 </div>
 
 <div class="resize-n"  aria-hidden="true" onmousedown={(e) => { e.preventDefault(); win.startResizeDragging('North'); }}></div>
@@ -326,11 +430,12 @@
 <div class="resize-ne" aria-hidden="true" onmousedown={(e) => { e.preventDefault(); win.startResizeDragging('NorthEast'); }}></div>
 <div class="resize-sw" aria-hidden="true" onmousedown={(e) => { e.preventDefault(); win.startResizeDragging('SouthWest'); }}></div>
 <div class="resize-se" aria-hidden="true" onmousedown={(e) => { e.preventDefault(); win.startResizeDragging('SouthEast'); }}></div>
+{/if}
 
 <style>
   .app {
     display: grid;
-    grid-template-rows: 38px 34px 50px 1fr 28px;
+    grid-template-rows: var(--titlebar-h) var(--tabbar-h) var(--toolbar-h) 1fr var(--statusbar-h);
     height: 100vh;
     background: var(--app-bg);
     border-radius: 14px;
@@ -344,7 +449,7 @@
   }
 
   .app.picker-mode {
-    grid-template-rows: 34px 50px 1fr 52px;
+    grid-template-rows: var(--tabbar-h) var(--toolbar-h) 1fr 52px;
   }
 
   .picker-titlebar {
@@ -450,11 +555,6 @@
     color: var(--red);
   }
 
-  .toast-info {
-    background: var(--success-bg);
-    border: 1px solid var(--success-bg);
-    color: var(--green);
-  }
 
   .toast button {
     color: inherit;

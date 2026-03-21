@@ -3,7 +3,7 @@ members = [".", "luzumi-portal"]
 
 [package]
 name = "luzumi"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [lib]
@@ -27,5 +27,21 @@ zip = "2"
 rusqlite = { version = "0.31", features = ["bundled"] }
 md5 = "0.7"
 sha2 = "0.10"
-notify = { version = "7", default-features = false, features = ["macos_fsevent"] }
+notify = { version = "7", default-features = true }
 percent-encoding = "2"
+strsim = "0.11"
+memmap2 = "0.9"
+lru = "0.12"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+tracing-appender = "0.2"
+pulldown-cmark = { version = "0.10", default-features = false, features = ["html"] }
+uuid = { version = "1", features = ["v4"] }
+regex = "1"
+chrono = "0.4"
+lazy_static = "1"
+aes-gcm = "0.10"
+argon2 = "0.5"
+rand = "0.8"
+tar = "0.4"
+zeroize = "1"

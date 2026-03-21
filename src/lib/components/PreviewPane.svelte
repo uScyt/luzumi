@@ -4,15 +4,27 @@
   import { t } from "../i18n";
   import { formatSize, getFileIcon, getFileColor } from "../types";
   import { renderIcon } from "../icons";
+  import CodePreview from "./preview/CodePreview.svelte";
+  import MarkdownPreview from "./preview/MarkdownPreview.svelte";
+  import PdfPreview from "./preview/PdfPreview.svelte";
+  import HexViewer from "./preview/HexViewer.svelte";
 
   const IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "gif", "bmp", "svg", "webp", "ico", "avif", "tiff", "tif", "heic", "heif", "jxl"]);
   const VIDEO_EXTS = new Set(["mp4", "m4v", "mkv", "avi", "mov", "webm", "flv", "wmv", "mpg", "mpeg", "ogv", "ogg", "3gp", "ts", "mts", "m2ts", "vob"]);
+  const CODE_EXTS = new Set([
+    "js", "ts", "tsx", "jsx", "svelte", "html", "css", "scss", "less",
+    "rs", "toml", "yaml", "yml", "xml", "json",
+    "py", "rb", "go", "java", "c", "cpp", "h", "hpp", "sql",
+    "sh", "bash", "zsh", "dockerfile",
+  ]);
   const TEXT_EXTS = new Set([
     "txt", "md", "json", "js", "ts", "tsx", "jsx", "svelte", "html", "css", "scss",
     "rs", "toml", "yaml", "yml", "xml", "csv", "log", "sh", "bash", "zsh",
     "py", "rb", "go", "java", "c", "cpp", "h", "hpp", "sql", "env", "gitignore",
     "conf", "cfg", "ini", "lock", "dockerfile",
   ]);
+  const PDF_EXTS = new Set(["pdf"]);
+  const MD_EXTS = new Set(["md", "markdown"]);
 
   const MAX_PREVIEW_LINES = 100;
 
@@ -32,6 +44,11 @@
   const isImage = $derived(IMAGE_EXTS.has(ext));
   const isVideo = $derived(VIDEO_EXTS.has(ext));
   const isText = $derived(TEXT_EXTS.has(ext));
+  const isCode = $derived(CODE_EXTS.has(ext));
+  const isPdf = $derived(PDF_EXTS.has(ext));
+  const isMarkdown = $derived(MD_EXTS.has(ext));
+
+  let previewMode = $state<"auto" | "hex">("auto");
 
   $effect(() => {
     const entry = selectedEntry;
@@ -73,14 +90,29 @@
       </span>
     </div>
 
+    <div class="preview-mode-toggle">
+      <button class:active={previewMode === "auto"} onclick={() => previewMode = "auto"}>Preview</button>
+      {#if selectedEntry.kind === "file"}
+        <button class:active={previewMode === "hex"} onclick={() => previewMode = "hex"}>Hex</button>
+      {/if}
+    </div>
+
     <div class="preview-body">
-      {#if loadingPreview}
+      {#if previewMode === "hex" && selectedEntry.kind === "file"}
+        <HexViewer filePath={selectedEntry.path} />
+      {:else if loadingPreview}
         <div class="loading">
           <svg class="spin" width="20" height="20" viewBox="0 0 16 16" fill="none">
             <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" opacity="0.2"/>
             <path d="M14 8A6 6 0 0 0 8 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
         </div>
+      {:else if isPdf}
+        <PdfPreview filePath={selectedEntry.path} />
+      {:else if isMarkdown}
+        <MarkdownPreview filePath={selectedEntry.path} />
+      {:else if isCode}
+        <CodePreview filePath={selectedEntry.path} />
       {:else if thumbnail}
         <div class="image-preview">
           <img src={thumbnail} alt={selectedEntry.name} onerror={() => { thumbnail = null; thumbFailed = true; }} />
@@ -169,6 +201,28 @@
   .file-meta {
     font-size: 11px;
     color: var(--overlay1);
+  }
+
+  .preview-mode-toggle {
+    display: flex;
+    gap: 2px;
+    padding: 4px 10px;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .preview-mode-toggle button {
+    background: none;
+    border: none;
+    color: var(--overlay1);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    cursor: pointer;
+  }
+
+  .preview-mode-toggle button.active {
+    background: var(--accent-muted, rgba(137, 180, 250, 0.15));
+    color: var(--accent, #89b4fa);
   }
 
   .preview-body {

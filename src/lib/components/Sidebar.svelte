@@ -122,7 +122,7 @@
     </section>
 
     <!-- Recent -->
-    {#if fm.recentLocations.length > 0}
+    {#if fm.ui.showRecents && fm.recentLocations.length > 0}
       <section>
         <div class="section-label">
           <svg class="section-icon" width="11" height="11" viewBox="0 0 16 16" fill="none">

@@ -1,0 +1,13 @@
+{
+    "KPlugin": {
+        "Id": "com.luzumi.desktopmenu",
+        "Name": "Luzumi Desktop Menu",
+        "Description": "Replaces Plasma desktop right-click menu with Luzumi's context menu",
+        "Category": "ContainmentActions",
+        "Icon": "luzumi",
+        "Authors": [{ "Name": "Luzumi" }],
+        "License": "MIT",
+        "Version": "0.2.0"
+    },
+    "X-Plasma-ContainmentActionType": "ContextualActions"
+}

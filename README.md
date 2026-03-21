@@ -12,7 +12,7 @@
 <p align="center">
   <a href="#installation"><img src="https://img.shields.io/badge/platform-Linux-blue?style=flat-square&logo=linux&logoColor=white" alt="Linux" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License" /></a>
-  <img src="https://img.shields.io/badge/version-0.1.0-purple?style=flat-square" alt="v0.1.0" />
+  <img src="https://img.shields.io/badge/version-0.2.0-purple?style=flat-square" alt="v0.2.0" />
   <img src="https://img.shields.io/badge/Rust-backend-orange?style=flat-square&logo=rust&logoColor=white" alt="Rust" />
 </p>
 
@@ -54,16 +54,17 @@
 
 **Keyboard-driven**
 - Every action has a shortcut
-- Editable address bar
+- Command palette (`Ctrl+Shift+P`) with natural language
+- Grid/list arrow key navigation
 - Bulk rename with regex
 
 </td>
 <td>
 
-**Secure by design**
-- pkexec auto-elevation
-- Multi-pass secure delete
-- Input validation & path traversal protection
+**Extensible**
+- JavaScript plugin system
+- Custom context menu actions
+- Event hooks & lifecycle API
 
 </td>
 </tr>
@@ -75,23 +76,42 @@
 
 ### Navigation & Views
 - **Dual view modes** — Grid view with thumbnails + detailed list view
+- **Keyboard navigation** — Arrow keys, Home/End in grid and list views
 - **Tabs** — Multiple directories, `Ctrl+Tab` to switch
 - **Split pane** — Side-by-side directory comparison
-- **Preview pane** — Images, videos (ffmpeg thumbnails), text, and metadata
+- **Preview pane** — Images, videos, PDF, Markdown, code (syntax highlighted), hex viewer
 - **Breadcrumb navigation** with editable address bar
 - **Virtual scrolling** — Handles massive directories smoothly
+- **Navigation history** — Right-click back/forward for timeline dropdown
+- **Workspaces** — Save and restore tab layouts
+- **Type filter** — Filter files by category (Images, Videos, Audio, Documents, Code, Archives) from the toolbar
+
+### Search
+- **Fuzzy search** — Instant filename matching with Jaro-Winkler scoring
+- **Content search** — Grep-like search inside files with line context
+- **Advanced search panel** (`Ctrl+Shift+F`) — Filter by type, size, date
+- **Natural language commands** — Type "sort by size" or "find duplicates" in the command palette
+- **Search history** — Last 50 searches saved
 
 ### File Operations
-- Copy, move, rename, duplicate, delete with **undo/redo**
-- **Cancel operations** — Stop long copy/move with progress indicator
-- **Secure deletion** — Multi-pass overwrite for sensitive files
+- Copy, move, rename, duplicate, delete with **undo/redo** (50-level stack)
+- **Inline rename** — New folder/file creates instantly and enters rename mode (like Nautilus/Dolphin)
+- **Operation queue** — Pause, resume, cancel running operations
+- **Conflict resolution** — Overwrite, auto-rename, or skip on copy/move conflicts
+- **Secure deletion** — Cryptographically random multi-pass overwrite for sensitive files
 - **Archive support** — Create & extract ZIP archives
 - **Bulk rename** — Find & replace, case conversion, sequential numbering
 - **Duplicate file finder** — Content-hash based detection
 - **Drag & drop** — Internal moves + cross-app drag via `text/uri-list`
+- **Folder comparison** — Side-by-side diff with left-only, right-only, modified, identical
+
+### Tags & Organization
+- **File tags** — Color-coded labels stored in SQLite
+- **Tag manager** — Create, rename, delete tags with color picker
+- **Smart suggestions** — Auto-analyze directories and suggest actions (organize, find duplicates, bulk rename)
 
 ### Filesystem & Permissions
-- **Real-time file watching** — Instant detection via `notify` crate
+- **Real-time file watching** — Instant detection via `notify` crate (auto-detects inotify on Linux)
 - **Permission editing** — Visual rwx checkboxes + octal input
 - **Auto-elevation** — Seamless pkexec when permission is denied
 - **Symlink support** — Create, follow, and detect broken links
@@ -104,20 +124,35 @@
 
 ### System Integration
 - **XDG Desktop Portal** — System-wide file picker with preview pane
-- **Open With** — Launch files with any installed app
+- **KDE Plasma desktop plugin** — Right-click context menu on the desktop (new folder/file with name prompt, paste, open terminal, open Luzumi)
+- **Open With** — Launch files with any installed app, set defaults, custom commands
 - **Set as default file manager** — One-click setup
 - **Open terminal here** — Launch terminal in current directory
+- **Integrity check** — Verify and auto-repair Luzumi installation from Settings
 
 ### Icons & Preview
 - **120+ file type icons** — Languages, archives, media, configs, ML models...
 - **Image thumbnails** in grid view (PNG, JPG, WebP, AVIF, HEIC...)
 - **Video thumbnails** via ffmpeg (MP4, MKV, AVI, MOV, WebM...)
-- **Dedicated icons** for LICENSE, README, .gitignore, .env, Dockerfile...
+- **PDF preview** — Page-by-page viewing via poppler
+- **Markdown preview** — Rendered HTML with full styling
+- **Code preview** — Syntax-highlighted source files
+- **Hex viewer** — Binary file inspection with offset/hex/ASCII columns
+- **Skeleton loading** — Placeholder rows while loading large directories
+
+### Accessibility
+- **Reduced motion** — Respects `prefers-reduced-motion` system setting
+- **WCAG contrast** — Improved overlay contrast ratios
+- **ARIA attributes** — Proper roles and live regions for screen readers
+- **Keyboard-accessible** — All views, dialogs, and controls support keyboard navigation
 
 ### Customization
 - **Full CSS theming** — Drop a `.css` file in `~/.config/luzumi/themes/`
 - Built-in Light, Nord, Catppuccin themes
-- Icon colors adapt to your palette automatically
+- **Density modes** — Comfortable, Compact, Dense
+- **Font size & line height** sliders
+- **High contrast mode** and **animation toggle**
+- **Plugin system** — Extend Luzumi with JavaScript plugins
 - French & English interface
 
 <br/>
@@ -167,6 +202,7 @@ Hot-reload is enabled — edit Svelte components and see changes instantly. Rust
 
 | Action | Shortcut |
 |:---|:---|
+| Command palette | `Ctrl+Shift+P` |
 | New tab | `Ctrl+T` |
 | Close tab | `Ctrl+W` |
 | Navigate back / forward | `Alt+Left` / `Alt+Right` |
@@ -174,15 +210,24 @@ Hot-reload is enabled — edit Svelte components and see changes instantly. Rust
 | Reload | `F5` |
 | Focus address bar | `Ctrl+L` |
 | Search | `Ctrl+F` |
+| Advanced search | `Ctrl+Shift+F` |
 | Select all | `Ctrl+A` |
+| Invert selection | `Ctrl+Shift+A` |
+| Select by pattern | `Ctrl+G` |
 | Copy / Cut / Paste | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` |
+| Duplicate | `Ctrl+D` |
 | Delete | `Delete` |
+| Secure delete | `Shift+Delete` |
 | Rename | `F2` |
-| Properties | `Ctrl+I` |
 | New folder | `Ctrl+Shift+N` |
 | Toggle hidden files | `Ctrl+H` |
+| Toggle preview | `Ctrl+P` |
+| Split view | `F3` |
 | List / Grid view | `Ctrl+1` / `Ctrl+2` |
 | Undo / Redo | `Ctrl+Z` / `Ctrl+Shift+Z` |
+| Settings | `Ctrl+,` |
+| Debug panel | `Ctrl+Shift+D` |
+| Keyboard shortcuts | `?` |
 
 <br/>
 
@@ -194,6 +239,40 @@ See **[THEMING.md](THEMING.md)** for the full variable reference and example the
 
 <br/>
 
+## Plugins
+
+Luzumi has a JavaScript plugin system for adding custom functionality. Plugins can:
+
+- Add items to the right-click context menu
+- React to navigation, file open, and selection events
+- Read files and directories through a sandboxed API
+- Show notifications and status messages
+
+**Quick example** — create `~/.config/luzumi/plugins/my-plugin/manifest.json`:
+
+```json
+{
+  "name": "my-plugin",
+  "version": "1.0.0",
+  "permissions": ["ui.notify", "nav.read"],
+  "hooks": ["onNavigate"]
+}
+```
+
+And `index.js`:
+
+```javascript
+return {
+  onNavigate(path) {
+    luzumi.ui.notify("Now in: " + path);
+  }
+};
+```
+
+See **[PLUGINS.md](PLUGINS.md)** for the full API reference, permissions, lifecycle hooks, and example plugins.
+
+<br/>
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -201,10 +280,16 @@ See **[THEMING.md](THEMING.md)** for the full variable reference and example the
 | Backend | Rust |
 | Frontend | Svelte 5 (runes) |
 | Framework | Tauri 2 |
-| File watching | `notify` crate (inotify) |
+| File watching | `notify` crate (auto-detects inotify/fsevents) |
+| Search | `strsim` (fuzzy), `regex` (glob), `memmap2` (content) |
+| Tags | SQLite (`rusqlite`) |
+| Preview | `pulldown-cmark` (md), `poppler` (pdf) |
+| Logging | `tracing` + `tracing-subscriber` |
 | Thumbnails | ffmpeg (video), base64 (images) |
 | Trash spec | Freedesktop + `percent-encoding` |
 | Styling | CSS custom properties (Catppuccin) |
+| Plugins | JavaScript with sandboxed API |
+| CI/CD | GitHub Actions |
 | Packaging | `.deb`, `.rpm`, AppImage |
 
 <br/>
@@ -213,26 +298,63 @@ See **[THEMING.md](THEMING.md)** for the full variable reference and example the
 
 ```
 luzumi/
-  src/                          # Svelte frontend
+  src/                              # Svelte frontend
     lib/
-      components/               # UI components
-        VirtualScroller.svelte  # Virtual scrolling for large dirs
-        FileGrid.svelte         # Grid view with thumbnails
-        FileList.svelte         # Detailed list view
-        PreviewPane.svelte      # Image/video/text preview
-        TrashView.svelte        # Trash management
-      fileManager.svelte.ts     # Core state management
-      i18n.ts                   # Translations (en, fr)
-      icons.ts                  # SVG icon library (120+ icons)
-      types.ts                  # Types & file icon/color mapping
-    App.svelte                  # Root component
-    app.css                     # Theme variables & base styles
-  src-tauri/                    # Rust backend
+      components/                   # UI components (30+)
+        preview/                    # Preview sub-components
+          CodePreview.svelte        # Syntax-highlighted code
+          MarkdownPreview.svelte    # Rendered markdown
+          PdfPreview.svelte         # PDF page viewer
+          HexViewer.svelte          # Binary hex viewer
+        dialogs/                    # Dialog components (15+)
+        CommandPalette.svelte       # Ctrl+Shift+P command launcher
+        DebugPanel.svelte           # Performance & logs panel
+        ErrorBoundary.svelte        # Crash recovery
+        OperationQueue.svelte       # Operation progress tracker
+        SuggestionBar.svelte        # Smart directory suggestions
+        WorkspaceSwitcher.svelte    # Workspace save/load
+        ...                         # FileGrid, FileList, PreviewPane, etc.
+      state/                        # Reactive state modules
+        searchState.svelte.ts       # Search query, results, history
+        selectionState.svelte.ts    # Selection & clipboard
+        navigationState.svelte.ts   # History, tabs, bookmarks
+        operationState.svelte.ts    # Undo/redo, operation queue
+        uiState.svelte.ts           # UI preferences & dialogs
+        sessionState.svelte.ts      # Session persistence
+        debugState.svelte.ts        # Performance tracking
+      plugins/                      # Plugin system
+        pluginApi.ts                # Sandboxed API for plugins
+        pluginLoader.ts             # Plugin lifecycle management
+      commandRegistry.ts            # Command palette registry
+      naturalCommand.ts             # Natural language command parser
+      errors.ts                     # Centralized error handling
+      transitions.ts                # Motion-aware transitions
+      eventBus.ts                   # Cross-component event system
+      fileManager.svelte.ts         # Core state (composes modules)
+      i18n.ts                       # Translations (en, fr)
+      icons.ts                      # SVG icon library (120+ icons)
+      types.ts                      # Types & file icon/color mapping
+    App.svelte                      # Root component
+    app.css                         # Theme variables & base styles
+  src-tauri/                        # Rust backend
     src/
-      lib.rs                    # Tauri commands & file watchers
-      filesystem.rs             # File ops, trash, permissions, mounts
-      desktop_apps.rs           # Application launcher
-    luzumi-portal/              # XDG Desktop Portal integration
+      lib.rs                        # Tauri commands (60+), integrity check
+      filesystem.rs                 # File ops, trash, permissions
+      search.rs                     # Fuzzy & content search (with ReDoS protection)
+      tags.rs                       # SQLite tag system
+      compare.rs                    # Folder comparison
+      preview.rs                    # PDF, markdown, hex preview
+      vault.rs                      # Encrypted vault system
+      plugins.rs                    # Plugin management
+      logging.rs                    # Structured logging (tracing)
+      operation_queue.rs            # Async operation queue
+      errors.rs                     # Typed error system
+      desktop_apps.rs               # Application launcher
+    luzumi-portal/                  # XDG Desktop Portal integration
+    kde-plugin/                     # KDE Plasma desktop context menu plugin
+  .github/workflows/               # CI/CD
+    ci.yml                          # Lint, clippy, test, audit
+    release.yml                     # Tag-based release
 ```
 
 <br/>

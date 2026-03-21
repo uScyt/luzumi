@@ -2,6 +2,16 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { FileEntry, BookmarkEntry, DriveInfo, ContextMenuState } from "./types";
 import { t } from "./i18n";
+import { SearchState } from "./state/searchState.svelte";
+import { SelectionState } from "./state/selectionState.svelte";
+import { NavigationState } from "./state/navigationState.svelte";
+import { OperationState } from "./state/operationState.svelte";
+import { UiState } from "./state/uiState.svelte";
+import { SessionState } from "./state/sessionState.svelte";
+import { DebugState } from "./state/debugState.svelte";
+import { eventBus } from "./eventBus";
+import { commandRegistry, type Command } from "./commandRegistry";
+import { parseAppError, needsElevation, isConflict, formatError } from "./errors";
 
 function parentDir(path: string): string {
   const idx = path.lastIndexOf("/");
@@ -51,10 +61,25 @@ const ICON_SIZE_DEFAULT = 64;
 const UNDO_STACK_LIMIT = 20;
 const WATCH_INTERVAL_MS = 2500;
 const DRIVE_REFRESH_MS = 3000;
+const nameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+const typeCollator = new Intl.Collator(undefined, { sensitivity: "base" });
 
 class FileManager {
+  // Composed state modules (new architecture)
+  readonly search = new SearchState();
+  readonly selection = new SelectionState();
+  readonly nav = new NavigationState();
+  readonly ops = new OperationState();
+  readonly ui = new UiState();
+  readonly session = new SessionState();
+  readonly debug = new DebugState();
+
+  // Legacy state (backward-compatible, delegates to modules over time)
   currentPath = $state("");
-  entries = $state<FileEntry[]>([]);
+  private _entries = $state<FileEntry[]>([]);
+  private _entriesVersion = 0;
+  get entries() { return this._entries; }
+  set entries(v: FileEntry[]) { this._entries = v; this._entriesVersion++; this._filteredCache = null; }
   selected = $state<Set<string>>(new Set());
   history = $state<string[]>([]);
   historyPos = $state(-1);
@@ -67,6 +92,7 @@ class FileManager {
   error = $state<string | null>(null);
   statusMessage = $state<string | null>(null);
   isLoading = $state(false);
+  typeFilter = $state<string | null>(null);
   renameTarget = $state<string | null>(null);
   renameBuffer = $state("");
   contextMenu = $state<ContextMenuState | null>(null);
@@ -84,6 +110,10 @@ class FileManager {
   saveAsSource = $state<string | null>(null);
   showNewFile = $state(false);
   newFileName = $state("untitled.txt");
+  showVaultCreate = $state<string | null>(null); // path of directory to vault
+  showVaultUnlock = $state<FileEntry | null>(null); // vault file entry
+  showVaultLock = $state<{ vaultPath: string; mountPath: string } | null>(null);
+  showVaultPassword = $state<string | null>(null); // vault path for password change
   sortBy = $state<"name" | "size" | "date" | "type">("name");
   sortDir = $state<"asc" | "desc">("asc");
   driveRefreshInterval: ReturnType<typeof setInterval> | null = null;
@@ -91,6 +121,7 @@ class FileManager {
   private _watchUnlisten: (() => void) | null = null;
   private _trashUnlisten: (() => void) | null = null;
   private _splitUnlisten: (() => void) | null = null;
+  private _dragDropUnlisten: Promise<() => void> | null = null;
   elevated = $state(false);
   undoStack = $state<UndoOp[]>([]);
   redoStack = $state<UndoOp[]>([]);
@@ -189,25 +220,24 @@ class FileManager {
   addRecentLocation(path: string) {
     const filtered = this.recentLocations.filter(p => p !== path);
     this.recentLocations = [path, ...filtered].slice(0, 20);
-    try { localStorage.setItem("luzumi_recent_locations", JSON.stringify(this.recentLocations)); } catch {}
+    try { localStorage.setItem("luzumi_recent_locations", JSON.stringify(this.recentLocations)); } catch (e) { console.error("Failed to save recent locations:", e); }
   }
 
   clearRecentLocations() {
     this.recentLocations = [];
-    try { localStorage.removeItem("luzumi_recent_locations"); } catch {}
+    try { localStorage.removeItem("luzumi_recent_locations"); } catch (e) { console.error("Failed to clear recent locations:", e); }
   }
 
   async calculateFolderSize(path: string) {
     this.folderSizes.set(path, -1); // -1 = loading
-    this.folderSizes = new Map(this.folderSizes);
     try {
       const size = await invoke<number>("cmd_calculate_dir_size", { path });
       this.folderSizes.set(path, size);
-      this.folderSizes = new Map(this.folderSizes);
-    } catch {
+    } catch (e) {
+      console.error("Failed to calculate folder size:", e);
       this.folderSizes.delete(path);
-      this.folderSizes = new Map(this.folderSizes);
     }
+    this.folderSizes = new Map(this.folderSizes);
   }
 
   async findDuplicates(recursive: boolean = true) {
@@ -249,6 +279,59 @@ class FileManager {
       await this.reload();
       const name = baseName(path);
       this.setStatus(t.archiveExtracted(name));
+    } catch (e) {
+      this.error = String(e);
+    }
+  }
+
+  async createVault(path: string, password: string, dummyPassword?: string) {
+    this.setStatus("Creating vault...");
+    try {
+      const vaultPath = await invoke<string>("cmd_create_vault", {
+        path,
+        password,
+        dummyPassword: dummyPassword || null,
+      });
+      await this.reload();
+      this.setStatus("Vault created");
+      return vaultPath;
+    } catch (e) {
+      this.error = String(e);
+      return null;
+    }
+  }
+
+  async unlockVault(vaultPath: string, password: string) {
+    this.setStatus("Unlocking vault...");
+    try {
+      const result = await invoke<{ mountPath: string; isDummy: boolean }>("cmd_unlock_vault", {
+        vaultPath,
+        password,
+      });
+      this.setStatus(result.isDummy ? "Vault unlocked (restricted)" : "Vault unlocked");
+      await this.navigate(result.mountPath);
+      return result;
+    } catch (e) {
+      this.error = String(e);
+      return null;
+    }
+  }
+
+  async lockVault(vaultPath: string, mountPath: string, password: string) {
+    this.setStatus("Locking vault...");
+    try {
+      await invoke("cmd_lock_vault", { vaultPath, mountPath, password });
+      this.setStatus("Vault locked");
+      await this.reload();
+    } catch (e) {
+      this.error = String(e);
+    }
+  }
+
+  async changeVaultPassword(vaultPath: string, oldPassword: string, newPassword: string) {
+    try {
+      await invoke("cmd_change_vault_password", { vaultPath, oldPassword, newPassword });
+      this.setStatus("Vault password changed");
     } catch (e) {
       this.error = String(e);
     }
@@ -302,7 +385,6 @@ class FileManager {
   async undo() {
     if (!this.undoStack.length) return;
     const op = this.undoStack[this.undoStack.length - 1];
-    this.undoStack = this.undoStack.slice(0, -1);
     const redoOp = this._invertOp(op);
     try {
       switch (op.type) {
@@ -324,6 +406,8 @@ class FileManager {
           await invoke("cmd_delete_entries", { paths: op.copies });
           break;
       }
+      // Only remove from stack AFTER successful execution
+      this.undoStack = this.undoStack.slice(0, -1);
       if (redoOp) this.redoStack = [...this.redoStack.slice(-19), redoOp];
       else this.redoStack = [];
       this.setStatus(t.undone);
@@ -334,18 +418,29 @@ class FileManager {
   async redo() {
     if (!this.redoStack.length) return;
     const op = this.redoStack[this.redoStack.length - 1];
-    this.redoStack = this.redoStack.slice(0, -1);
     const undoOp = this._invertOp(op);
     try {
       switch (op.type) {
         case "rename":
           await invoke("cmd_rename_entry", { from: op.newPath, newName: op.origName });
           break;
+        case "trash":
+          for (const name of op.fileNames)
+            await invoke("cmd_restore_from_trash", { fileName: name });
+          break;
+        case "create":
+          await invoke("cmd_delete_entries", { paths: [op.path] });
+          break;
         case "move":
           for (const { newPath, origParent } of op.moves)
             await invoke("cmd_move_entries", { paths: [newPath], dest: origParent });
           break;
+        case "duplicate":
+          await invoke("cmd_delete_entries", { paths: op.copies });
+          break;
       }
+      // Only remove from stack AFTER successful execution
+      this.redoStack = this.redoStack.slice(0, -1);
       if (undoOp) this.undoStack = [...this.undoStack.slice(-19), undoOp];
       this.setStatus(t.redone);
       await this.reload();
@@ -359,21 +454,21 @@ class FileManager {
       this.sortBy = field;
       this.sortDir = "asc";
     }
-    try { localStorage.setItem("luzumi_sort_by", this.sortBy); } catch (_) {}
-    try { localStorage.setItem("luzumi_sort_dir", this.sortDir); } catch (_) {}
+    try { localStorage.setItem("luzumi_sort_by", this.sortBy); } catch (e) { console.error("Failed to save sort preference:", e); }
+    try { localStorage.setItem("luzumi_sort_dir", this.sortDir); } catch (e) { console.error("Failed to save sort direction:", e); }
   }
 
   setGridIconSize(size: number) {
     this.gridIconSize = Math.max(ICON_SIZE_MIN, Math.min(ICON_SIZE_MAX, size));
     if (this._iconSizeTimer) clearTimeout(this._iconSizeTimer);
     this._iconSizeTimer = setTimeout(() => {
-      try { localStorage.setItem("luzumi_icon_size", String(this.gridIconSize)); } catch (_) {}
+      try { localStorage.setItem("luzumi_icon_size", String(this.gridIconSize)); } catch (e) { console.error("Failed to save icon size:", e); }
     }, 300);
   }
 
   toggleHoverBox() {
     this.showHoverBox = !this.showHoverBox;
-    try { localStorage.setItem("luzumi_hover_box", String(this.showHoverBox)); } catch (_) {}
+    try { localStorage.setItem("luzumi_hover_box", String(this.showHoverBox)); } catch (e) { console.error("Failed to save hover box pref:", e); }
   }
 
   loadSortPrefs() {
@@ -382,24 +477,41 @@ class FileManager {
       const sd = localStorage.getItem("luzumi_sort_dir");
       if (sb === "name" || sb === "size" || sb === "date" || sb === "type") this.sortBy = sb;
       if (sd === "asc" || sd === "desc") this.sortDir = sd;
-    } catch (_) {}
+    } catch (e) { console.error("Failed to load sort preferences:", e); }
   }
 
+  private static readonly TYPE_FILTER_MAP: Record<string, Set<string>> = {
+    image: new Set(["png","jpg","jpeg","gif","webp","bmp","svg","ico","tiff","heic","avif","jxl"]),
+    video: new Set(["mp4","mkv","avi","mov","webm","flv","wmv","mpg","mpeg","ogv"]),
+    audio: new Set(["mp3","flac","wav","ogg","m4a","aac","wma","opus","aiff"]),
+    document: new Set(["pdf","doc","docx","odt","txt","rtf","tex","md","rst"]),
+    code: new Set(["rs","py","js","ts","c","cpp","go","java","rb","php","svelte","vue","jsx","tsx","html","css"]),
+    archive: new Set(["zip","tar","gz","bz2","xz","7z","rar","zst"]),
+  };
+
   filteredEntries(): FileEntry[] {
-    const key = `${this.entries.length}|${this.searchQuery}|${this.sortBy}|${this.sortDir}|${this.entries[0]?.modified ?? 0}|${this.entries[this.entries.length - 1]?.path ?? ""}`;
+    const key = `${this._entriesVersion}|${this.searchQuery}|${this.sortBy}|${this.sortDir}|${this.typeFilter}`;
     if (this._filterCacheKey === key && this._filteredCache) return this._filteredCache;
     let entries = this.searchQuery
       ? this.entries.filter((e) => e.name.toLowerCase().includes(this.searchQuery.toLowerCase()))
       : [...this.entries];
+    if (this.typeFilter) {
+      const allowed = FileManager.TYPE_FILTER_MAP[this.typeFilter];
+      if (this.typeFilter === "directory") {
+        entries = entries.filter(e => e.kind === "directory");
+      } else if (allowed) {
+        entries = entries.filter(e => e.kind === "directory" || allowed.has((e.extension ?? "").toLowerCase()));
+      }
+    }
     const dir = this.sortDir === "asc" ? 1 : -1;
     entries.sort((a, b) => {
       if (a.kind !== b.kind) return a.kind === "directory" ? -1 : 1;
       let cmp = 0;
       switch (this.sortBy) {
-        case "name": cmp = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }); break;
+        case "name": cmp = nameCollator.compare(a.name, b.name); break;
         case "size": cmp = (a.size ?? 0) - (b.size ?? 0); break;
         case "date": cmp = (a.modified ?? 0) - (b.modified ?? 0); break;
-        case "type": cmp = (a.extension ?? "").localeCompare(b.extension ?? "", undefined, { sensitivity: "base" }); break;
+        case "type": cmp = typeCollator.compare(a.extension ?? "", b.extension ?? ""); break;
       }
       return cmp * dir;
     });
@@ -411,17 +523,17 @@ class FileManager {
   async init() {
     this.loadSortPrefs();
     try {
-      const [home, bm, dr, qa] = await Promise.all([
+      const [home, bm, dr, qa, startupPath, startupSelect] = await Promise.all([
         invoke<string>("get_home_dir"),
         invoke<BookmarkEntry[]>("cmd_get_bookmarks"),
         invoke<DriveInfo[]>("cmd_get_drives"),
         invoke<BookmarkEntry[]>("cmd_get_quick_access"),
+        invoke<string>("cmd_get_startup_path"),
+        invoke<string | null>("cmd_get_startup_select"),
       ]);
       this.bookmarks = bm;
       this.drives = dr;
       this.quickAccess = qa;
-      const startupPath = await invoke<string>("cmd_get_startup_path");
-      const startupSelect = await invoke<string | null>("cmd_get_startup_select");
       await this.navigate(startupPath || home);
       if (startupSelect) {
         const fullPath = this.currentPath.replace(/\/$/, "") + "/" + startupSelect;
@@ -437,15 +549,19 @@ class FileManager {
       }];
       this.activeTabIndex = 0;
       await this.initPicker();
+      // Non-blocking: fire background tasks without awaiting
       this.startDriveRefresh();
       this.refreshTrashSize();
       this.startTrashWatch();
-      this.checkDefaultFileManager();
-      this.checkPortalInstalled();
-      this.loadThemeList();
       if (this.currentTheme !== "Default") this.applyTheme(this.currentTheme);
+      // Defer non-critical checks
+      queueMicrotask(() => {
+        this.checkDefaultFileManager();
+        this.checkPortalInstalled();
+        this.loadThemeList();
+      });
       // Listen for native file drops from external apps
-      listen<{ paths: string[]; position: { x: number; y: number } }>(
+      this._dragDropUnlisten = listen<{ paths: string[]; position: { x: number; y: number } }>(
         "tauri://drag-drop",
         (event) => {
           const { paths } = event.payload;
@@ -482,11 +598,12 @@ class FileManager {
           if (this._dirSignature(fresh) !== this._dirSignature(this.entries)) {
             this.entries = fresh;
           }
-        } catch (_) {}
+        } catch (e) { console.error("Watch refresh failed:", e); }
       });
       this._watchUnlisten = unlisten;
-    } catch (_) {
+    } catch (e) {
       // Fallback to polling if notify fails
+      console.warn("File watch failed, falling back to polling:", e);
       this._watchInterval = setInterval(async () => {
         if (this.isLoading || this.deleteProgress) return;
         try {
@@ -494,7 +611,7 @@ class FileManager {
           if (this._dirSignature(fresh) !== this._dirSignature(this.entries)) {
             this.entries = fresh;
           }
-        } catch (_) {}
+        } catch (e) { console.error("Poll refresh failed:", e); }
       }, WATCH_INTERVAL_MS);
     }
   }
@@ -513,7 +630,7 @@ class FileManager {
         this.refreshTrashSize();
       });
       this._trashUnlisten = unlisten;
-    } catch (_) {}
+    } catch (e) { console.error("Failed to start trash watch:", e); }
   }
 
   stopTrashWatch() {
@@ -525,10 +642,16 @@ class FileManager {
     this.stopWatch();
     this.stopTrashWatch();
     if (this._splitUnlisten) { this._splitUnlisten(); this._splitUnlisten = null; }
+    if (this._dragDropUnlisten) { this._dragDropUnlisten.then(fn => fn()); this._dragDropUnlisten = null; }
     if (this.driveRefreshInterval) { clearInterval(this.driveRefreshInterval); this.driveRefreshInterval = null; }
     if (this._searchDebounce) { clearTimeout(this._searchDebounce); this._searchDebounce = null; }
     if (this._statusTimer) { clearTimeout(this._statusTimer); this._statusTimer = null; }
     if (this._iconSizeTimer) { clearTimeout(this._iconSizeTimer); this._iconSizeTimer = null; }
+    // Clean up composed state modules
+    this.search.destroy();
+    this.ui.destroy();
+    this.session.destroy();
+    eventBus.destroy();
   }
 
   startDriveRefresh() {
@@ -539,7 +662,7 @@ class FileManager {
   async refreshDrives() {
     try {
       this.drives = await invoke<DriveInfo[]>("cmd_get_drives");
-    } catch (_) {}
+    } catch (e) { console.error("Failed to refresh drives:", e); }
   }
 
   async navigate(path: string) {
@@ -630,6 +753,10 @@ class FileManager {
   }
 
   async open(entry: FileEntry) {
+    if (entry.isVault) {
+      this.showVaultUnlock = entry;
+      return;
+    }
     if (entry.kind === "directory" || entry.kind === "symlink") {
       await this.navigate(entry.path);
     } else {
@@ -656,25 +783,37 @@ class FileManager {
             this.globalSearchResults = results.filter(
           (r) => !currentPaths.has(r.path)
         );
-      } catch {
+      } catch (e) {
+        console.error("Global search failed:", e);
         this.globalSearchResults = [];
       }
       this.globalSearchLoading = false;
     }, 300);
   }
 
+  private _renaming = false;
+
   async rename(from: string, newName: string) {
+    if (this._renaming) return;
+    this._renaming = true;
     try {
       const origName = baseName(from);
+      if (newName === origName) { this.renameTarget = null; return; }
+      if (this.entries.some(e => e.name === newName && e.path !== from)) {
+        this.error = `A file named "${newName}" already exists in this folder`;
+        return;
+      }
+      this.renameTarget = null;
       const parent = parentDir(from);
       const cmd = this.elevated ? "cmd_elevated_rename" : "cmd_rename_entry";
       await invoke(cmd, { from, newName });
       this.pushUndo({ type: "rename", newPath: parent + "/" + newName, origName });
       this.setStatus(t.renamedTo(newName));
-      this.renameTarget = null;
       await this.reload();
     } catch (e) {
       this.error = String(e);
+    } finally {
+      this._renaming = false;
     }
   }
 
@@ -722,17 +861,34 @@ class FileManager {
         this.secureDeleteSelected();
         return;
       }
-    } catch (_) {}
+    } catch (e) { console.error("Failed to check secure delete pref:", e); }
     this.showSecureDeleteConfirm = true;
   }
 
-  async createFolder(name: string) {
+  private _uniqueName(base: string, ext: string): string {
+    const existing = new Set(this.entries.map(e => e.name));
+    const full = ext ? `${base}${ext}` : base;
+    if (!existing.has(full)) return full;
+    for (let i = 2; ; i++) {
+      const candidate = ext ? `${base} ${i}${ext}` : `${base} ${i}`;
+      if (!existing.has(candidate)) return candidate;
+    }
+  }
+
+  async createFolder(name?: string) {
     try {
+      const finalName = name ?? this._uniqueName("New Folder", "");
       const cmd = this.elevated ? "cmd_elevated_create_directory" : "cmd_create_directory";
-      await invoke(cmd, { parent: this.currentPath, name });
-      this.pushUndo({ type: "create", path: this.currentPath + "/" + name });
-      this.setStatus(t.folderCreated(name));
+      await invoke(cmd, { parent: this.currentPath, name: finalName });
+      this.pushUndo({ type: "create", path: this.currentPath + "/" + finalName });
+      this.setStatus(t.folderCreated(finalName));
       await this.reload();
+      const created = this.entries.find(e => e.name === finalName);
+      if (created) {
+        this.selected = new Set([created.path]);
+        this.renameBuffer = finalName;
+        this.renameTarget = created.path;
+      }
     } catch (e) {
       this.error = String(e);
     }
@@ -763,7 +919,6 @@ class FileManager {
       if (mode === "copy") {
         const cmd = this.elevated ? "cmd_elevated_copy" : "cmd_copy_entries";
         await invoke(cmd, { paths: toProcess, dest: destDir });
-        this.clipboard = null;
       } else {
         const moves = toProcess.map(p => ({
           newPath: destDir + "/" + baseName(p),
@@ -771,10 +926,29 @@ class FileManager {
         }));
         const cmd = this.elevated ? "cmd_elevated_move" : "cmd_move_entries";
         await invoke(cmd, { paths: toProcess, dest: destDir });
-        this.clipboard = null;
         this.pushUndo({ type: "move", moves });
       }
+      // Clear clipboard only AFTER successful operation
+      this.clipboard = null;
       this.setStatus(t.pastedItems(toProcess.length));
+      await this.reload();
+    } catch (e) {
+      // Clipboard preserved on failure so user can retry
+      this.error = String(e);
+    }
+  }
+
+  async pasteAsSymlink() {
+    if (!this.clipboard) return;
+    const { paths } = this.clipboard;
+    try {
+      for (const p of paths) {
+        const name = baseName(p);
+        const linkPath = this.currentPath + "/" + name;
+        await invoke("cmd_create_symlink", { target: p, linkPath });
+      }
+      this.setStatus(`Created ${paths.length} symlink(s)`);
+      this.clipboard = null;
       await this.reload();
     } catch (e) {
       this.error = String(e);
@@ -891,7 +1065,7 @@ class FileManager {
     try {
       await invoke("cmd_cancel_operation");
       this.setStatus(t.cancelled);
-    } catch (_) {}
+    } catch (e) { console.error("Failed to cancel operation:", e); }
   }
 
   handleExternalDrop(sourcePaths: string[], dest: string) {
@@ -1030,9 +1204,9 @@ class FileManager {
       if (!this.isDefaultFileManager) {
         try {
           this.showDefaultBanner = localStorage.getItem("luzumi_default_dismissed") !== "1";
-        } catch { this.showDefaultBanner = true; }
+        } catch (e) { console.error("Failed to read default banner pref:", e); this.showDefaultBanner = true; }
       }
-    } catch (_) {}
+    } catch (e) { console.error("Failed to check default file manager:", e); }
   }
 
   async setAsDefaultFileManager() {
@@ -1046,13 +1220,13 @@ class FileManager {
 
   dismissDefaultBanner() {
     this.showDefaultBanner = false;
-    try { localStorage.setItem("luzumi_default_dismissed", "1"); } catch (_) {}
+    try { localStorage.setItem("luzumi_default_dismissed", "1"); } catch (e) { console.error("Failed to save banner dismissal:", e); }
   }
 
   async refreshTrashSize() {
     try {
       this.trashSize = await invoke<number>("cmd_get_trash_size");
-    } catch (_) {}
+    } catch (e) { console.error("Failed to refresh trash size:", e); }
   }
 
   async openTrash() {
@@ -1126,12 +1300,19 @@ class FileManager {
     this.saveAsSource = null;
   }
 
-  async createFile(name: string) {
+  async createFile(name?: string) {
     try {
-      await invoke("cmd_create_file", { parent: this.currentPath, name });
-      this.pushUndo({ type: "create", path: this.currentPath + "/" + name });
-      this.setStatus(t.fileCreated(name));
+      const finalName = name ?? this._uniqueName("untitled", ".txt");
+      await invoke("cmd_create_file", { parent: this.currentPath, name: finalName });
+      this.pushUndo({ type: "create", path: this.currentPath + "/" + finalName });
+      this.setStatus(t.fileCreated(finalName));
       await this.reload();
+      const created = this.entries.find(e => e.name === finalName);
+      if (created) {
+        this.selected = new Set([created.path]);
+        this.renameBuffer = finalName;
+        this.renameTarget = created.path;
+      }
     } catch (e) {
       this.error = String(e);
     }
@@ -1180,7 +1361,7 @@ class FileManager {
           await this.navigate(config.current_folder);
         }
       }
-    } catch (_) {}
+    } catch (e) { console.error("Failed to init picker:", e); }
   }
 
   async submitPicker() {
@@ -1206,7 +1387,7 @@ class FileManager {
   async cancelPicker() {
     try {
       await invoke("cmd_cancel_picker");
-    } catch (_) {}
+    } catch (e) { console.error("Failed to cancel picker:", e); }
   }
 
   pickerFilteredEntries(): FileEntry[] {
@@ -1240,7 +1421,7 @@ class FileManager {
   async checkPortalInstalled() {
     try {
       this.portalInstalled = await invoke<boolean>("cmd_check_portal_installed");
-    } catch (_) {}
+    } catch (e) { console.error("Failed to check portal status:", e); }
   }
 
   async installPortal() {
@@ -1271,7 +1452,7 @@ class FileManager {
 
   async applyTheme(name: string) {
     this.currentTheme = name;
-    try { localStorage.setItem("luzumi_theme", name); } catch {}
+    try { localStorage.setItem("luzumi_theme", name); } catch (e) { console.error("Failed to save theme:", e); }
 
     document.documentElement.classList.add("theme-transitioning");
 
@@ -1465,12 +1646,10 @@ class FileManager {
         if (target) this.showProperties = target;
         break;
       case "new-folder":
-        this.showNewFolder = true;
-        this.newFolderName = "New Folder";
+        this.createFolder();
         break;
       case "new-file":
-        this.showNewFile = true;
-        this.newFileName = "untitled.txt";
+        this.createFile();
         break;
       case "pin-current":
         {
@@ -1607,3 +1786,15 @@ class FileManager {
 }
 
 export const fm = new FileManager();
+
+// Re-export state types and utilities for direct access
+export { commandRegistry } from "./commandRegistry";
+export { eventBus } from "./eventBus";
+export { parseAppError, formatError, needsElevation, isConflict } from "./errors";
+export type { UndoOp } from "./state/operationState.svelte";
+export type { SearchFilter, SearchHistoryItem, ContentMatch } from "./state/searchState.svelte";
+export type { TabSnapshot } from "./state/navigationState.svelte";
+export type { SessionData } from "./state/sessionState.svelte";
+export type { ViewDensity } from "./state/uiState.svelte";
+export type { Command, CommandCategory } from "./commandRegistry";
+export type { AppError, AppErrorType } from "./errors";

@@ -1,0 +1,13 @@
+/home/kujau/Desktop/projects/luzumi/src-tauri/kde-plugin/build/CMakeFiles/uninstall.dir
+/home/kujau/Desktop/projects/luzumi/src-tauri/kde-plugin/build/CMakeFiles/fetch-translations.dir
+/home/kujau/Desktop/projects/luzumi/src-tauri/kde-plugin/build/CMakeFiles/Plasma_QCH.dir
+/home/kujau/Desktop/projects/luzumi/src-tauri/kde-plugin/build/CMakeFiles/plasma_containmentactions_luzumi.dir
+/home/kujau/Desktop/projects/luzumi/src-tauri/kde-plugin/build/CMakeFiles/test.dir
+/home/kujau/Desktop/projects/luzumi/src-tauri/kde-plugin/build/CMakeFiles/edit_cache.dir
+/home/kujau/Desktop/projects/luzumi/src-tauri/kde-plugin/build/CMakeFiles/rebuild_cache.dir
+/home/kujau/Desktop/projects/luzumi/src-tauri/kde-plugin/build/CMakeFiles/list_install_components.dir
+/home/kujau/Desktop/projects/luzumi/src-tauri/kde-plugin/build/CMakeFiles/install.dir
+/home/kujau/Desktop/projects/luzumi/src-tauri/kde-plugin/build/CMakeFiles/install/local.dir
+/home/kujau/Desktop/projects/luzumi/src-tauri/kde-plugin/build/CMakeFiles/install/strip.dir
+/home/kujau/Desktop/projects/luzumi/src-tauri/kde-plugin/build/CMakeFiles/plasma_containmentactions_luzumi_autogen_timestamp_deps.dir
+/home/kujau/Desktop/projects/luzumi/src-tauri/kde-plugin/build/CMakeFiles/plasma_containmentactions_luzumi_autogen.dir

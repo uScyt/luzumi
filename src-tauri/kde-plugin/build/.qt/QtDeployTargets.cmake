@@ -1,0 +1,2 @@
+set(__QT_DEPLOY_TARGET_plasma_containmentactions_luzumi_FILE /home/kujau/Desktop/projects/luzumi/src-tauri/kde-plugin/build/plasma_containmentactions_luzumi.so)
+set(__QT_DEPLOY_TARGET_plasma_containmentactions_luzumi_TYPE MODULE_LIBRARY)

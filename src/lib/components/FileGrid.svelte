@@ -6,6 +6,7 @@
   import { t } from "../i18n";
   import { renderIcon } from "../icons";
   import FileTooltip from "./FileTooltip.svelte";
+  import SkeletonRow from "./SkeletonRow.svelte";
   import VirtualScroller from "./VirtualScroller.svelte";
 
   const IMAGE_EXTS = new Set(["png","jpg","jpeg","gif","webp","bmp","svg","ico","tiff","tif","heic","heif","avif","jxl"]);
@@ -67,6 +68,7 @@
   // Rubber band selection
   let containerEl: HTMLElement;
   let rubberBox = $state<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  let rubberRafId: number | null = null;
 
   function onContainerMouseDown(e: MouseEvent) {
     if ((e.target as HTMLElement).closest(".grid-card")) return;
@@ -77,9 +79,14 @@
 
     const onMove = (ev: MouseEvent) => {
       rubberBox = { ...rubberBox!, x2: ev.clientX, y2: ev.clientY };
-      updateRubberSelection(ev.ctrlKey);
+      if (rubberRafId !== null) cancelAnimationFrame(rubberRafId);
+      rubberRafId = requestAnimationFrame(() => {
+        rubberRafId = null;
+        updateRubberSelection(ev.ctrlKey);
+      });
     };
     const onUp = () => {
+      if (rubberRafId !== null) { cancelAnimationFrame(rubberRafId); rubberRafId = null; }
       rubberBox = null;
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
@@ -120,6 +127,67 @@
 
   let renameInput = $state<HTMLInputElement | null>(null);
 
+  $effect(() => {
+    if (renameInput && fm.renameTarget) {
+      renameCommitted = false;
+      renameInput.focus();
+      renameInput.select();
+    }
+  });
+
+  function onGridKeydown(e: KeyboardEvent) {
+    if (fm.renameTarget) return;
+    const entries = displayed;
+    if (entries.length === 0) return;
+    const cols = gridColumns;
+    const sel = [...fm.selected];
+    const lastPath = sel.at(-1);
+    const currentIdx = lastPath ? entries.findIndex(entry => entry.path === lastPath) : -1;
+
+    let nextIdx = currentIdx;
+    switch (e.key) {
+      case "ArrowRight":
+        e.preventDefault();
+        nextIdx = Math.min(currentIdx + 1, entries.length - 1);
+        break;
+      case "ArrowLeft":
+        e.preventDefault();
+        nextIdx = Math.max(currentIdx - 1, 0);
+        break;
+      case "ArrowDown":
+        e.preventDefault();
+        nextIdx = Math.min(currentIdx + cols, entries.length - 1);
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        nextIdx = Math.max(currentIdx - cols, 0);
+        break;
+      case "Home":
+        e.preventDefault();
+        nextIdx = 0;
+        break;
+      case "End":
+        e.preventDefault();
+        nextIdx = entries.length - 1;
+        break;
+      case "Enter":
+        if (currentIdx >= 0) {
+          e.preventDefault();
+          fm.open(entries[currentIdx]);
+        }
+        return;
+      default:
+        return;
+    }
+
+    if (nextIdx !== currentIdx && nextIdx >= 0) {
+      fm.selected = new Set([entries[nextIdx].path]);
+      // Scroll into view
+      const card = containerEl?.querySelector(`[data-path="${CSS.escape(entries[nextIdx].path)}"]`);
+      card?.scrollIntoView({ block: "nearest" });
+    }
+  }
+
   // Tooltip
   let tooltipEntry = $state<FileEntry | null>(null);
   let tooltipPos = $state({ x: 0, y: 0 });
@@ -152,12 +220,16 @@
     });
   }
 
+  let renameCommitted = false;
+
   function commitRename() {
-    if (!fm.renameTarget) return;
+    if (renameCommitted || !fm.renameTarget) return;
+    renameCommitted = true;
+    const target = fm.renameTarget;
     const buf = fm.renameBuffer.trim();
-    const entry = fm.entries.find((e) => e.path === fm.renameTarget);
+    const entry = fm.entries.find((e) => e.path === target);
     if (buf && entry && buf !== entry.name) {
-      fm.rename(fm.renameTarget, buf);
+      fm.rename(target, buf);
     } else {
       fm.renameTarget = null;
     }
@@ -311,16 +383,19 @@
   class:show-hover={fm.showHoverBox}
   style="--icon-size: {fm.gridIconSize}px; --card-min: {fm.gridIconSize + 40}px"
   role="grid"
+  aria-label="File grid"
   tabindex="0"
   bind:this={containerEl}
   oncontextmenu={(e) => onContextMenu(e, null)}
   ondragover={onBgDragOver}
   ondrop={onBgDrop}
   onmousedown={onContainerMouseDown}
-  onkeydown={() => {}}
+  onkeydown={onGridKeydown}
   onclick={(e) => { if (!(e.target as HTMLElement).closest(".grid-card")) fm.selected = new Set(); }}
 >
-  {#if displayed.length === 0}
+  {#if fm.isLoading && displayed.length === 0}
+    <SkeletonRow type="grid" count={12} />
+  {:else if displayed.length === 0}
     <div class="empty-state">
       <svg width="48" height="48" viewBox="0 0 16 16" fill="none" opacity=".2">
         <path d="M2 5C2 4.45 2.45 4 3 4H7L9 6H13C13.55 6 14 6.45 14 7V12C14 12.55 13.55 13 13 13H3C2.45 13 2 12.55 2 12V5Z" stroke="currentColor" stroke-width="1" fill="currentColor" opacity=".2"/>
@@ -344,6 +419,7 @@
               class:cut={fm.clipboard?.mode === "cut" && fm.clipboard.paths.includes(entry.path)}
               class:drop-target={fm.dropTarget === entry.path}
               class:dragging={fm.dragPaths.includes(entry.path)}
+              class:hidden-entry={entry.isHidden}
               role="gridcell"
               tabindex="0"
               data-path={entry.path}
@@ -352,7 +428,7 @@
               ondblclick={() => { if (!isRenaming) fm.open(entry); }}
               oncontextmenu={(e) => onContextMenu(e, entry)}
               onkeydown={(e) => {
-                if (e.key === "Enter") { fm.open(entry); return; }
+                if (e.key === "Enter") { if (!isRenaming) fm.open(entry); return; }
                 if (e.key === "F2") { startRename(entry); return; }
                 if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
                   e.preventDefault();
@@ -409,6 +485,7 @@
                   onclick={(e) => e.stopPropagation()}
                   ondblclick={(e) => e.stopPropagation()}
                   onkeydown={(e) => {
+                    e.stopPropagation();
                     if (e.key === "Enter") { e.preventDefault(); commitRename(); }
                     if (e.key === "Escape") { e.preventDefault(); fm.renameTarget = null; }
                   }}
@@ -542,6 +619,10 @@
 
   .grid-card.selected:hover {
     background: var(--accent-muted);
+  }
+
+  .grid-card.hidden-entry {
+    opacity: 0.55;
   }
 
   .grid-card.cut {

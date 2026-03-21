@@ -1,0 +1,6 @@
+# Hashes of file build rules.
+a5f865aae5ce0f15ae44757c82a9fed1 CMakeFiles/fetch-translations
+6e4842aac8929b67d0b150ebaaf97c48 CMakeFiles/plasma_containmentactions_luzumi_autogen
+3b4b0988b882e7af3dfda7e931f477f9 CMakeFiles/uninstall
+9344ccc11dcc035ba182cef5b48c621d plasma_containmentactions_luzumi_autogen/timestamp
+cbedec68308c6dc7070c9b76e9879420 releaseme
