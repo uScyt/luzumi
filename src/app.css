@@ -89,8 +89,8 @@
   --border-light: rgba(255, 255, 255, 0.06);
   --border-medium: rgba(255, 255, 255, 0.08);
 
-  --scrollbar-thumb: rgba(73, 77, 100, 0.4);
-  --scrollbar-thumb-hover: rgba(91, 96, 120, 0.7);
+  --scrollbar-thumb: var(--surface1);
+  --scrollbar-thumb-hover: var(--surface2);
   --selection-bg: rgba(198, 160, 246, 0.3);
 
   --spacing-xs: 4px;
@@ -136,21 +136,32 @@ input, textarea {
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
 }
 
 ::-webkit-scrollbar-track {
   background: transparent;
+  margin: 4px 0;
 }
 
 ::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
-  border-radius: 3px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.2s;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* Firefox scrollbar */
